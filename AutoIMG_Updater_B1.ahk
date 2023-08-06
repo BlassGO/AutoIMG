@@ -37,9 +37,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.0.0
+version = 1.0.1
 status = Beta
-build_date = 05.08.2023
+build_date = 06.08.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -47,7 +47,7 @@ maintainer_build_author = @BlassGO
 original_author = @BlassGO
 name = AutoIMG
 title := name "/" version
-height := 350
+height := 370
 weight := 300
 my := 10
 mx := 10
@@ -1507,18 +1507,8 @@ ensure_fastboot() {
 	   }
       */
       print(">> Rebooting in fastboot...")
-	   if (default_mode=1) {
-         result .= adb_serial("reboot bootloader")
-      } else {
-	     result .= adb_serial("reboot fastboot")
-	   }
-	   if InStr(result, "refused") {
-	     if (default_mode=1) {
-            result .= adb_shell("reboot bootloader")
-         } else {
-	        result .= adb_shell("reboot fastboot")
-	     }
-	   }
+      (default_mode=1) ? mode:="bootloader" : mode:="fastboot"
+      (ensure_shell||InStr(result:=adb_serial("reboot " . mode), "refused")) ? result .= adb_shell("reboot " . mode)
 	   print(">> Waiting device")
    }
    find_device(20)
@@ -3036,7 +3026,7 @@ Gui, Add, Text, Y+0 c00adc9 Section vheader, %name%
 Gui, Font, s10, %style%
 Gui, Add, Text, X+0 YP+10 c1FB012 vline, ------
 Gui, Add, Button, center X+0 YS+5 h30 w100 gfind_device vfind_device, Find My Device
-Gui, Add, Tab2, x%mx% Y+10 vtabs hwndtabshw Group,, Home|Reboot|Settings|Wifi|Info
+Gui, Add, Tab3, x%mx% Y+10 vtabs hwndtabshw Group,, Home|Reboot|Settings|Wifi|Info
 Gui, Tab, 1
 Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5, Build: %build_author%/%build_date%
 Gui, Add, Text, YP+30 XP+10 Section, Select .IMG or Config: 
@@ -3050,7 +3040,7 @@ If !ImageButton.Create(clean, Opt1, Opt2) {
 }
 Gui, Add, Text, XS Y+10, Destination Partition: 
 Gui, Add, Edit, center X+20 YP h20 w100 vpartition, None
-Gui, Add, Edit, x%mx% Y+15 h115 w%boxW% vconsole hwndgeneralbox 0x200 border HScroll ReadOnly, >> Start Tool: %start_date% in W%winver%`r`n
+Gui, Add, Edit, x%mx% Y+15 h135 w%boxW% vconsole hwndgeneralbox 0x200 border HScroll ReadOnly, >> Start Tool: %start_date% in W%winver%`r`n
 Gui, Add, Progress, R0-100 XP Y+0 h60 w130 -Smooth 0x200 BackgroundC9C9C9 c3d484a vinstall_bar Section, 0
 Gui, Add, Button, center XP YP h60 w130 0x200 border ginstall vinstall, INSTALL
 Gui, Font, s9, %style%
@@ -3078,6 +3068,7 @@ Gui, Add, Edit, center X+10 YP h20 w100 +Lowercase gsave_preferences vdefault_sl
 Gui, Add, Checkbox, XS+10 Y+10 vpreferences gsave_preferences, Save my preferences
 Gui, Add, Checkbox, XP Y+4 vforce_install gsave_preferences, Force the Installation
 Gui, Add, Checkbox, XP Y+4 vensure_recovery gsave_preferences, Prioritize Recovery
+Gui, Add, Checkbox, XP Y+4 vensure_shell gsave_preferences, Prioritize Shell
 Gui, Add, Checkbox, XP Y+4 vall_formats gsave_preferences, Enable all file formats
 Gui, Add, Checkbox, XP Y+4 vconfig_tracking gsave_preferences AltSubmit, Enable Config Tracking
 Gui, Tab, 4
@@ -3210,6 +3201,7 @@ save_preferences:
 		IniWrite, %disable_config_overwrite%, % current "\configs.ini", GENERAL, disable_config_overwrite
 		IniWrite, %force_install%, % current "\configs.ini", GENERAL, force_install
 		IniWrite, %ensure_recovery%, % current "\configs.ini", GENERAL, ensure_recovery
+      IniWrite, %ensure_shell%, % current "\configs.ini", GENERAL, ensure_shell
 		IniWrite, %all_formats%, % current "\configs.ini", GENERAL, all_formats
 		IniWrite, %default_mode%, % current "\configs.ini", GENERAL, default_mode
 		IniWrite, %default_slot%, % current "\configs.ini", GENERAL, default_slot
@@ -3227,12 +3219,14 @@ update_preferences:
 		IniRead, disable_config_overwrite, % current "\configs.ini", GENERAL, disable_config_overwrite, 0
 		IniRead, force_install, % current "\configs.ini", GENERAL, force_install, 0
 		IniRead, ensure_recovery, % current "\configs.ini", GENERAL, ensure_recovery, 0
+      IniRead, ensure_shell, % current "\configs.ini", GENERAL, ensure_shell, 0
 		IniRead, all_formats, % current "\configs.ini", GENERAL, all_formats, 0
 		IniRead, default_mode, % current "\configs.ini", GENERAL, default_mode, 1
 		IniRead, default_slot, % current "\configs.ini", GENERAL, default_slot, auto
 		IniRead, config_tracking, % current "\configs.ini", GENERAL, config_tracking, 0
-		IniRead, ip, % current "\configs.ini", GENERAL, ip,
+		IniRead, ip, % current "\configs.ini", GENERAL, ip, 0
 		IniRead, port, % current "\configs.ini", GENERAL, port, 5555
+      (!ip) ? ip:=""
 		GuiControl, 1:, preferences, %preferences%
 		GuiControl, 1:, disable_verify, %disable_verify%
 		GuiControl, 1:, reboot, %reboot%
@@ -3240,6 +3234,7 @@ update_preferences:
 		GuiControl, 1:, disable_config_overwrite, %disable_config_overwrite%
 		GuiControl, 1:, force_install, %force_install%
 		GuiControl, 1:, ensure_recovery, %ensure_recovery%
+      GuiControl, 1:, ensure_shell, %ensure_shell%
 		GuiControl, 1:, all_formats, %all_formats%
 		GuiControl, 1:Choose, default_mode, %default_mode%
 		GuiControl, 1:, default_slot, %default_slot%
@@ -3295,6 +3290,7 @@ select:
 return
 
 only_reboot:
+   Gui, 1:Submit, NoHide
 	if (serial && !check_active(serial))
 	   return
 	if !exist_device {
@@ -3302,18 +3298,18 @@ only_reboot:
 	} else {
 		print(">> Rebooting...")
 		if (device_mode!="fastboot") {
-		   InStr(adb_serial("reboot"), "refused") ? adb_shell("reboot")
+		   (ensure_shell||InStr(adb_serial("reboot"), "refused")) ? adb_shell("reboot")
 		} else {
 		   fastboot_serial("reboot")
 		}
       exist_device=
       device_mode=
-      device_connection=
 		remember_mode = booted
 	}
 return
 
 reboot_recovery:
+   Gui, 1:Submit, NoHide
 	if (serial && !check_active(serial))
 	   return
 	if !exist_device {
@@ -3322,13 +3318,12 @@ reboot_recovery:
 	} else {
 		print(">> Rebooting in recovery...")
 		if (device_mode!="fastboot") {
-		   InStr(adb_serial("reboot recovery"), "refused") ? adb_shell("reboot recovery")
+		   (ensure_shell||InStr(adb_serial("reboot recovery"), "refused")) ? adb_shell("reboot recovery")
 		} else {
 		   fastboot_serial("reboot recovery")
 		}
       exist_device=
       device_mode=
-      device_connection=
 		remember_mode = recovery
 	}
 return
@@ -3349,7 +3344,6 @@ reboot_fastboot:
 		}
       exist_device=
       device_mode=
-      device_connection=
 		find_device(20) ? (device_mode="fastboot") ? fastbootd ? print(">> Mode: fastbootd") : print(">> Mode: fastboot")
 	}
 return

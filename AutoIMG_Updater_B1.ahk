@@ -1,4 +1,4 @@
-﻿#NoEnv
+#NoEnv
 #SingleInstance Ignore
 SendMode Input  ; Recommended for new scripts due to its superior speed and reliability.
 SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
@@ -37,9 +37,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.0.1
+version = 1.0.2
 status = Beta
-build_date = 06.08.2023
+build_date = 07.08.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -670,27 +670,7 @@ timed_msg_destroy() {
    Gui new5: Destroy
 }
 get_bootloader_env() {
-   global device_mode
-   global exist_device
-   global unlocked
-   global fastbootd
-   global secure
-   global current_slot
-   global logical_name
-   global size_name
-   global size
-   global super
-   global serial
-   global current_anti
-   Loop % logical_name.MaxIndex() {
-      logical.Delete(A_Index)
-   }
-   Loop % size_name.MaxIndex() {
-      size_name.Delete(A_Index)
-   }
-   Loop % size.MaxIndex() {
-      size.Delete(A_Index)
-   }
+   global device_mode, exist_device, unlocked, fastbootd, secure, current_slot, super, serial, current_anti, native_parts, general_log
    unlocked =
    fastbootd =
    secure =
@@ -699,16 +679,12 @@ get_bootloader_env() {
    super =
    if (serial && !check_active(serial))
       return 0
-   if !exist_device
-      return 0
    if (device_mode!="fastboot")
       return 0
    get := fastboot_serial("getvar all")
    if !get
       return 0
-   logical_name := []
-   size_name := []
-   size := []
+   native_parts := {}
    huh := StrSplit(get, [A_Tab,")","`r","`n",":"])
    Loop % huh.MaxIndex()
    {
@@ -745,91 +721,69 @@ get_bootloader_env() {
 		If (huh[A_Index]="is-logical") {
 			if (huh[A_Index+2]="yes") {
 			   super := true
-			   logical_count++
-               logical_name[logical_count] := huh[A_Index+1]
+            try {
+               native_parts.HasKey(huh[A_Index+1]) ? native_parts[huh[A_Index+1]].is_logical:=true : native_parts[huh[A_Index+1]]:={is_logical:true}
+            } catch e {
+               write_file("`nAbnormal partition: " . huh[A_Index+1] . "-->" . e.message . "`n",general_log)
+            }
 			}
 	    }
 		If (huh[A_Index]="partition-size") {
-		    raw := huh[A_Index+2]
+		   raw := huh[A_Index+2]
 			SetFormat, Integer, D
 			raw += 0
 			if raw is integer
 			{
-			   size_count++
-               size_name[size_count] := huh[A_Index+1]
-			   if (huh[A_Index+1] ~= "^(system|system_ext|vendor|product|odm)(_a|_b)$") && !is_logical(huh[A_Index+1]) {
-			      super := true
-			      logical_count++
-                  logical_name[logical_count] := huh[A_Index+1]
-			   } else if !super && (huh[A_Index+1]="super" || huh[A_Index+1]="SUPER") {
-			      super := true
-			   }
-			   size[size_count] := raw
+            try {
+               native_parts.HasKey(huh[A_Index+1]) ? native_parts[huh[A_Index+1]].size:=raw : native_parts[huh[A_Index+1]]:={size:raw}
+               if (huh[A_Index+1] ~= "^(system|system_ext|vendor|product|odm)(_a|_b)$") && !native_parts[huh[A_Index+1]].is_logical {
+                  super:=true
+                  native_parts[huh[A_Index+1]].is_logical:=true
+               } else if !super && (huh[A_Index+1]="super") {
+                  super:=true
+               }
+            } catch e {
+               write_file("`nAbnormal partition: " . huh[A_Index+1] . "-->" . e.message . "`n",general_log)
+            }
 			}
 	    }
    }  
 }
 is_logical(part) {
-   global logical_name  
-   Loop % logical_name.MaxIndex() {
-      if (logical_name[A_Index]=part)
-	     return 1
-   }
-   return 0
+   global native_parts
+   return native_parts.HasKey(part) ? native_parts[part].is_logical : false
 }
 is_real(part) {
-   global size_name 
-   Loop % size_name.MaxIndex() {
-      if (size_name[A_Index]=part)
-	     return 1
-   }
-   return 0
+   global native_parts
+   return native_parts.HasKey(part) 
 }
 get_size(part) {
-   global size_name
-   global size   
-   Loop % size_name.MaxIndex() {
-      if (size_name[A_Index]=part)
-	     return size[A_Index]
-   }
-   return
+   global native_parts
+   return native_parts.HasKey(part) ? native_parts[part].size : false
 }
 free_logical(){
    global super
-   global logical_name
+   global native_parts
    if !super
       return 0
    get_bootloader_env()
-   subpart_size := 0
-   free_logical := 0
-   super_size := get_size("super")
-   if !super_size {
+   subpart_size := 0, free_logical := 0, subpart_count:=0
+   if !(super_size := get_size("super")) {
       print(">> Empty SUPER image!")
       return
    }
-   Loop % logical_name.MaxIndex() {
-      subpart_size += get_size(logical_name[A_Index])
-   }
+   for part, props in native_parts
+       (props.is_logical) ? (subpart_count++, subpart_size+=props.size)
    if (super_size>subpart_size) {
        ; 1MB reserved for each subpart
-       free_logical := (super_size - 1048576 * logical_name.MaxIndex()) - subpart_size
+       free_logical := (super_size - 1048576 * subpart_count) - subpart_size
    } else {
       print(">> Abnormal SUPER image!")
-      return
    }
-   if (free_logical>0) {
-      return free_logical
-   } else {
-      return 0
-   }
+   return (free_logical>0) ? free_logical : 0
 }
 check_free_space(img, part) {
-   global mx, my, style, logical_name, dummy_img, super, need, start, partcontrol, free_logical, serial, HeaderColors
-   ;Loop, % logical_name.MaxIndex() {
-   ;   if list 
-   ;	     list .= "|"
-   ;   list .= logical_name[A_Index]
-   ;}
+   global mx, my, style, native_parts, dummy_img, super, need, start, partcontrol, free_logical, serial, HeaderColors
    if (serial && !check_active(serial))
       return 0
    part_size := get_size(part)
@@ -866,13 +820,14 @@ check_free_space(img, part) {
    Gui 2: Add, ListView, AltSubmit NoSortHdr -LV0x10 LV0x20 Checked gpartcontrol vpartcontrol hwndpartcontrol XS Y+10, |Partition to remove|Size
    Gui 2: Add, Button, AltSubmit center XS Y+10 h20 w100 vstart gstart, START
    LV_Delete()
-   Loop, % logical_name.MaxIndex() {
-      if (logical_name[A_Index]=part)
-	     continue
-      size := get_size(logical_name[A_Index])
-      If (size<=0)
-	     continue
-	  LV_Add("", "", logical_name[A_Index], normal_units(size))
+   for part2, props in native_parts {
+       if props.is_logical {
+          if (part2=part)
+             continue
+          if (props.size<=0)
+	          continue
+          LV_Add("", "", part2, normal_units(props.size))
+       }
    }
    Loop % LV_GetCount("Column")
       LV_ModifyCol(A_Index, "AutoHdr Center")
@@ -2075,11 +2030,7 @@ check_bin(force := "") {
    return 1
 }
 download(url, to, option:="") {
-   global secure_user_info
-   global general_log
-   global HERE
-   global TOOL
-   global current
+   global secure_user_info, general_log, HERE, TOOL, current, adb, fastboot
    GetFullPathName(to) ? to := GetFullPathName(to)
    if (to==current "\configs.ini") {
       MsgBox, 262144, Download Service, % " Attempting to replace:`n`n " to "`n`n This action is not allowed for your security"
@@ -2091,6 +2042,14 @@ download(url, to, option:="") {
    del "%A_ScriptFullPath%"
    if exist "%A_ScriptFullPath%" goto destroy
    move "%to%" "%A_ScriptFullPath%"
+   `(goto`) 2>nul & del "`%~f0" & cmd /c start "%A_ScriptFullPath%" "%A_ScriptFullPath%"
+   )
+   updating_script_zip=
+   (
+   :destroy
+   del "%A_ScriptFullPath%"
+   if exist "%A_ScriptFullPath%" goto destroy
+   move "%current%\update.exe" "%A_ScriptFullPath%"
    `(goto`) 2>nul & del "`%~f0" & cmd /c start "%A_ScriptFullPath%" "%A_ScriptFullPath%"
    )
    if (secure_user_info && !(to ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
@@ -2118,6 +2077,8 @@ download(url, to, option:="") {
    }
    if (option ~= "\bupdate\b") {
       update=true
+   } else if (option ~= "\bupdate_zip\b") {
+      update_zip=true
    }
    if (option ~= "\bforce\b") {
       force=true
@@ -2128,8 +2089,18 @@ download(url, to, option:="") {
 		 if !force && (hash=get_hash(A_ScriptFullPath,hashtype)) {
 			write_file("`n" A_ScriptName " already updated, skipping...`n", general_log)
 			return 1
-	     }
-	  } else {
+	     } else if !url {
+           just_update:=true
+        }
+	  } else if update_zip {
+        RegExMatch(read_xml("https://raw.githubusercontent.com/BlassGO/auto_img_request/main/hash.txt",, true), "\b[A-Fa-f0-9]{" checklen "}\b", hash)
+        if !force && (hash=get_hash(A_ScriptFullPath,hashtype)) {
+			write_file("`n" A_ScriptName " already updated, skipping...`n", general_log)
+			return 1
+	     } else {
+          RegExMatch(read_xml("https://raw.githubusercontent.com/BlassGO/auto_img_request/main/hash_zip.txt",, true), "\b[A-Fa-f0-9]{" checklen "}\b", hash)
+        }
+     } else {
          RegExMatch(option, "\b[A-Fa-f0-9]{" checklen "}\b", hash)
 	  }
 	  if !hash {
@@ -2137,12 +2108,16 @@ download(url, to, option:="") {
 		 return 0
 	  }
    }
-   bytes := HttpQueryInfo(url, 5)
-   if bytes is not integer
-   {
-	  write_file("`n" wbasename(to) " download ended with: " bytes "`n", general_log)
-      MsgBox, 262144, ERROR, % "Oops! no response from download server, try again later"
-	  return 0
+   if just_update {
+      FileGetSize, bytes, % to
+   } else {
+      bytes := HttpQueryInfo(url, 5)
+      if bytes is not integer
+      {
+         write_file("`n" wbasename(to) " download ended with: " bytes "`n", general_log)
+         MsgBox, 262144, ERROR, % "Oops! no response from download server, try again later"
+         return 0
+      }
    }
    if FileExist(to) {
       FileGetSize, currentbytes, % to
@@ -2151,18 +2126,8 @@ download(url, to, option:="") {
 	     if hash {
 		    if (hash=get_hash(to,hashtype)) {
 			   write_file("`n" basename(to) " passed " hashtype " hash check, skipping...`n", general_log)
-			   if update {
-				  FileDelete, % current "\killmeplz.bat"
-				  if FileExist(current "\killmeplz.bat") {
-				     MsgBox, 262144, ERROR, % "Anomaly was detected, please update the tool manually from an official site"
-					 return 0
-				  } else {
-					 FileAppend, % updating_script, % current "\killmeplz.bat"
-					 Run, "%current%\killmeplz.bat", , Hide
-					 gosub finish
-				  }
-			   }
-			   return 1
+            gosub do_update
+            return result
 			} else {
 			   write_file("`n" basename(to) " DID NOT pass " hashtype " hash check, removing...`n", general_log)
 			   FileDelete, % to
@@ -2194,19 +2159,7 @@ download(url, to, option:="") {
 	  } else if hash {
 	     if (hash=get_hash(to,hashtype)) {
 			write_file("`n" basename(to) " passed " hashtype " hash check`n", general_log)
-			if update {
-			   FileDelete, % current "\killmeplz.bat"
-			   if FileExist(current "\killmeplz.bat") {
-			      MsgBox, 262144, ERROR, % "Anomaly was detected, please update the tool manually from an official site"
-				  result:=0
-			   } else {
-				  FileAppend, % updating_script, % current "\killmeplz.bat"
-				  Run, "%current%\killmeplz.bat", , Hide
-				  gosub finish
-			   }
-			} else {
-			   result:=1
-			}
+			gosub do_update
 		 } else {
 			write_file("`n" basename(to) " DID NOT pass " hashtype " hash check, removing...`n", general_log)
 			FileDelete, % to
@@ -2221,11 +2174,59 @@ download(url, to, option:="") {
    disable_bar()
    return result
    progress:
-   FileGetSize, currentbytes, % to
-   If total := Round(currentbytes/bytes*100) {
-      GuiControl, 1:, install_bar, % total
-   }
+            FileGetSize, currentbytes, % to
+            If total := Round(currentbytes/bytes*100) {
+               GuiControl, 1:, install_bar, % total
+            }
    return
+   do_update:
+            result:=1
+            if update_zip {
+               Process, Close, % basename(adb)
+               Process, Close, % basename(fastboot)
+               FileDelete, % current "\update.exe"
+               if InStr(FileExist(current "\update.exe"), "A") {
+				      anomaly:=true
+               } else {
+                  Loop, parse, % read_xml("https://raw.githubusercontent.com/BlassGO/auto_img_request/main/bin_tree.txt",, true), `n,`r 
+                  {
+                      if InStr(FileExist(current "\" A_LoopField), "D") {
+                         FileRemoveDir, % current "\" A_LoopField, 1
+                         if InStr(FileExist(current "\" A_LoopField), "D") {
+                             MsgBox, 262144, ERROR, % "Busy folder:`n`n" current "\" A_LoopField
+                             result:=0
+					              return
+                         }
+                      }
+                  }
+                  if unzip(to "\bin", current, "force inside-zip") && unzip(to, current, "files force regex: ^[^\\]+\.exe$") {
+                     FileMove, % current "\*.exe", % current "\update.exe"
+                     if InStr(FileExist(current "\update.exe"), "A") {
+                        update:=true, updating_script:=updating_script_zip
+                     } else {
+                        anomaly:=true
+                     }
+                  } else {
+                     anomaly:=true
+                  }
+               }
+            }
+			   if update {
+				  FileDelete, % current "\killmeplz.bat"
+				  if FileExist(current "\killmeplz.bat") {
+				     anomaly:=true
+				  } else {
+					 FileAppend, % updating_script, % current "\killmeplz.bat"
+					 Run, "%current%\killmeplz.bat", , Hide
+					 gosub finish
+				  }
+			   }
+            if anomaly {
+               MsgBox, 262144, ERROR, % "Anomaly was detected, please update the tool manually from an official site."
+               gotolink("https://github.com/BlassGO/AutoIMG")
+					result:=0
+            }
+	return
 }
 boot(img) {
    global exist_device

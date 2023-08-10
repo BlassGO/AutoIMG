@@ -1378,7 +1378,7 @@ install_manager() {
                if (install_files.MaxIndex()=A_EventInfo)
                   GuiControl, 1:, partition, ZIP FILE
                if (zip_msg!=1) {
-                  MsgBox, 262144, HELP, The installation of ZIPs requires a Custom Recovery, so`nAll loaded ZIPs will be installed after the IMGs and not in load order
+                  MsgBox, 262144, HELP, The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order
                   IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
                }
             } else if (ext_file="cpio") {
@@ -1658,8 +1658,10 @@ push(file, dest) {
    result := adb_shell("[ ! -d " """" dest """" " ] && mkdir -p " """" dest """")
    print(">> Sending " basename(file) "...")
    ensure_shell()
-   Sleep, 1000
-   ensure_shell()
+   if (device_mode="recovery") {
+      Sleep, 1000
+      ensure_shell()
+   }
    result .= adb_serial("push " """" file """" " " """" dest """")
    result .= adb_shell("[ ! -f " """" dest "/" basename(file) """" " ] && echo " """" "ERROR: Cant find " basename(file) """")
    if (result ~= "i)\berror|failed\b") {
@@ -2495,7 +2497,8 @@ remove_magisk(dir) {
    if cat && exist_file(TMP "/header") {
       header := adb_shell("cat " TMP "/header" " || echo CANT READ")
 	  if !InStr(header, "CANT READ") {
-		 cmdline := RegExReplace(header, "(?:^|.*\R)cmdline=(.+?(?=\R)).*", "$1")
+		 cmdline := RegExReplace(header, "(?:^|.*\R)cmdline=(.+?(?=\R)).*", "$1", cmd_result)
+       (!cmd_result) ? cmdline:=""
 	  }
    }
    if cmdline && InStr(cmdline, "skip_override") {
@@ -2815,7 +2818,8 @@ decompress(file, dest := ""){
       base .= " " """" dest """"
    try := adb_shell(base)
    if !(try ~= "\braw\b"){
-      format := Trim(RegExReplace(try, "(?:^|.*\R).*format: \[(.+?(?=\])).*", "$1"), A_Space)
+      format := Trim(RegExReplace(try, "(?:^|.*\R).*format: \[(.+?(?=\])).*", "$1",result), A_Space)
+      (!result) ? format:=""
    }
    return format
 }
@@ -3322,7 +3326,7 @@ select:
 		 GuiControl, 1:, partition, ZIP FILE
 		 install(file, "ZIP FILE")
 		 if (zip_msg!=1) {
-			help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery, so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
+			help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
 			IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
 		 }
 	  } else if (ext="config") {
@@ -3465,10 +3469,10 @@ install:
 	if !(to_install||to_install_zip||to_install_ramdisk||to_remove||to_create) && (format_data!=1) {
 	  MsgBox, 262144, HELP, Please enable at least one action/installation
 	  return
-   } else if !to_install && to_install_zip {
-	  goto recovery_install
    } else if !to_install && to_install_ramdisk {
       goto ramdisk_install
+   } else if !to_install && to_install_zip {
+	  goto recovery_install
    }
 
 fastboot_install:
@@ -3541,34 +3545,13 @@ fastboot_install:
 	   }
 	}
 
-recovery_install:
-   if !install_fail {
-      if to_install_zip {
-         disable_bar()
-         FD_CURRENT ? load_config("section ""before_zip""",,, FD_CURRENT)
-         print(">> Loading ZIP installation")
-         enable_bar()
-         progress := Round(100/to_install_zip)
-         for index, file in install_files {
-            if file.install&&file.is_zip {
-               if flash_zip_push(file.file) {
-                  add_progress(progress)
-               } else {
-                  install_fail := true
-                  break
-               }
-            }
-         }
-         FD_CURRENT ? load_config("section ""after_zip""",,, FD_CURRENT)
-	   }
-   }
-
 ramdisk_install:
-	disable_bar()
    if !install_fail {
       if to_install_ramdisk {
+         disable_bar()
          FD_CURRENT ? load_config("section ""before_ramdisk""",,, FD_CURRENT)
          enable_bar()
+         PATH := PATH ? PATH . ":/data/adb/magisk" : "/data/adb/magisk"
          if (device_mode!="booted"&&device_mode!="recovery") {
              option:=Option("Reboot menu", "Your device must be Booted or in Recovery mode for Ramdisk Installation`n`nWhat do you prefer?", "Reboot in Recovery", "Normal reboot")
              if (option=1)
@@ -3586,7 +3569,14 @@ ramdisk_install:
              }
          }
          print(">> Loading RAMDISK installation")
-         PATH := PATH ? PATH . ":/data/adb/magisk" : "/data/adb/magisk"
+         print(">> Magiskboot? ",false)
+         if run_binary("magiskboot") {
+            print("YEAH")
+         } else {
+            MsgBox, 262144, ERROR, You did not install MAGISK on your device, it is needed for Ramdisk patching
+            print("NAO"), disable_bar()
+            return
+         }
          if (ramdisk_dest=1) {
             print(">> A/B? ",false)
             (slot:=get_slot()) ? print("YEAH") : print("NAO")
@@ -3625,6 +3615,33 @@ ramdisk_install:
          }
          FD_CURRENT ? load_config("section ""after_ramdisk""",,, FD_CURRENT)
 	   }
+   }
+
+recovery_install:
+   disable_bar()
+   if !install_fail {
+      if to_install_zip {
+         FD_CURRENT ? load_config("section ""before_zip""",,, FD_CURRENT)
+         print(">> Loading ZIP installation")
+         enable_bar()
+         progress := Round(100/to_install_zip)
+         for index, file in install_files {
+            if file.install&&file.is_zip {
+               if flash_zip_push(file.file) {
+                  add_progress(progress)
+               } else {
+                  install_fail := true
+                  break
+               }
+            }
+         }
+         disable_bar()
+         if install_fail {
+            print(">> Aborted ZIP Installation!")
+            return
+         }
+         FD_CURRENT ? load_config("section ""after_zip""",,, FD_CURRENT)
+	   }
       FD_CURRENT ? load_config("section ""after_all""",,, FD_CURRENT)
       if (reboot=1) {
          FD_CURRENT ? load_config("section ""before_reboot""",,, FD_CURRENT)
@@ -3635,6 +3652,7 @@ ramdisk_install:
       print(">> Done")
    }
 return
+
 
 Esc::
 finish:

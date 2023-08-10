@@ -86,7 +86,7 @@ OnMessage(KeyDown:=0x100, "__DinoEvent__")
 ; ConfigRC
 config_rc() {
    global secure_user_info, CONFIG, HERE, TOOL, PATH:="", formats:=""
-   global wireless_IP:="", wireless_PORT:="", hidden_devices:="", wireless_FORCE:=""
+   global wireless_IP:="", wireless_PORT:="", hidden_devices:="", wireless_FORCE:="", serial
    ; Native
    GLOBAL.false:=0, GLOBAL.true:=1, GLOBAL.verdadero:=1, GLOBAL.falso:=0
    ; Extra
@@ -603,7 +603,8 @@ maps(key) {
 			 update_ramdisk_push: {update_ramdisk_push: {max:1, at:1, atpos:true}, in: {support:true, literal:true, max:1, at:2}},
 			 update_kernel: {update_kernel: {max:1, at:1, atpos:true}, in: {support:true, literal:true, max:1, at:2}},
 			 update_kernel_push: {update_kernel_push: {max:1, at:1, atpos:true}, in: {support:true, literal:true, max:1, at:2}},
-			 install_recovery_ramdisk: {install_recovery_ramdisk: {max:1, literal:true}}
+			 install_recovery_ramdisk: {install_recovery_ramdisk: {max:1, literal:true}},
+			 find_block: {find_block: {max:1, literal:true}}
 		  }
 	   )
 	   for k, value in maps2

@@ -37,9 +37,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.0.2
+version = 1.1.0
 status = Beta
-build_date = 07.08.2023
+build_date = 09.08.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -555,19 +555,14 @@ adb_shell(action, noroot := "", noescape := "") {
    return result
 }
 ensure_shell() {
-   global adb
-   global exist_device
-   global device_mode
-   global remember_mode
-   global general_log
-   global serial
-   while !InStr(run_cmd("""" adb """" " -s " serial " shell echo pwu"), "pwu")
+   global adb, exist_device, device_mode, remember_mode, general_log, serial
+   while !InStr(adb_serial("shell echo pwu"), "pwu")
    {
       if !attemps {
 	     print(">> Waiting device shell")
-		 attemps := true
-	  }
-      find_device(1)
+		  attemps := true
+	   }
+      (!(serial&&check_active(serial))) ? find_device(1)
    }
 }
 fastboot(action, seconds := "") {
@@ -912,8 +907,53 @@ normal_units(size) {
    else
       return Unknown
 }
+optimize() {
+   global cache, serial, general_log
+   if (serial && !check_active(serial))
+      return
+   (!IsObject(cache)) ? cache:={commands:{}, parts:{}}
+   Loop, parse, % adb_shell("ls -lR /dev/block 2>dev/null"), `n,`r 
+   {
+      if (chr:=SubStr(A_LoopField,1,1)) {
+         if (chr="/") {
+            dir:=Trim(A_LoopField,A_Space "`t:")
+         } else if (chr~="^b|c|l$") {
+            try {
+               data:=StrSplit(Trim(A_LoopField,A_Space "`t"), A_Space)
+               (chr="l") ? cache.parts[data[data.MaxIndex()-2]]:=data.Pop() : cache.parts[data[data.MaxIndex()]]:=dir "/" data.Pop()
+               data:=""
+            } catch e {
+                write_file("`nCACHE: " e.message " -> " A_LoopField "`n",general_log)
+            }
+         }
+      }
+   }
+   Loop, parse, % adb_shell("IFS="":""; for dir in $PATH; do echo $dir; ls -l $dir 2>/dev/null; done"), `n,`r 
+   {
+      if (chr:=SubStr(A_LoopField,1,1)) {
+         if (chr="/") {
+            dir:=Trim(A_LoopField,A_Space "`t")
+         } else if (chr~="^-|l$") {
+            try {
+               data:=StrSplit(Trim(A_LoopField,A_Space "`t"), A_Space)
+               if (chr="l") {
+                  name:=data[data.MaxIndex()-2]
+               } else {
+                  name:=data.Pop()
+                  (SubStr(name,0)="*") ? name:=SubStr(name,1,StrLen(name)-1)
+               }
+               (!(cache.commands.HasKey(name)||InStr(name,"/"))) ? cache.commands[name]:=dir "/" name
+               data:=""
+            } catch e {
+                write_file("`nCACHE: " e.message " -> " A_LoopField "`n",general_log)
+            }
+         }
+      }
+   }
+   return 1
+}
 find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
-   global exist_device, device_mode, device_connection, remember_mode, currentdevice, devices, serial, current
+   global exist_device, device_mode, device_connection, remember_mode, currentdevice, devices, serial, current, cache
    global wireless_IP, wireless_PORT, hidden_devices, wireless_FORCE
    global style, adb, mx, my, general_log, HeaderColors, ip_check
    exist_device=
@@ -921,6 +961,7 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
    device_connection=
    serial_n=0
    remember_mode=
+   cache=
    if show_box {
       if hidden_devices
 	     print(">> Finding hidden device...")
@@ -1140,7 +1181,12 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
    if exist_device {
       if (device_mode="fastboot")
          get_bootloader_env()
-      return 1
+      else {
+         print(">> Optimizing: Please wait...")
+         optimize()
+         print(">> Optimizing: Done")
+      }
+      return serial
    } else {
       return 0
    }
@@ -1262,7 +1308,7 @@ install_manager() {
          ext := "*." formats
       }
    }
-   (!ext) ? ext := "*.img;*.zip;*.apk"
+   (!ext) ? ext := "*.img;*.zip;*.apk;*.cpio"
    Gui 3: Default 
    Gui 3: +AlwaysOnTop
    Gui 3: margin, %mx%, %my%
@@ -1323,7 +1369,8 @@ install_manager() {
             install_files[A_EventInfo].file := file
             LV_Modify(A_EventInfo, "Col3", file)
             LV_ModifyCol(3, "AutoHdr")
-            if !(install_files[A_EventInfo].part="UPDATE FILE") && (extname(file)="zip" || extname(file)="apk") {
+            ext_file:=extname(file)
+            if !(install_files[A_EventInfo].part="UPDATE FILE") && (ext_file="zip" || ext_file="apk") {
                install_files[A_EventInfo].is_zip:=true
                install_files[A_EventInfo].part:="ZIP FILE"
                LV_Modify(A_EventInfo, "Col2", "ZIP FILE")
@@ -1334,6 +1381,13 @@ install_manager() {
                   MsgBox, 262144, HELP, The installation of ZIPs requires a Custom Recovery, so`nAll loaded ZIPs will be installed after the IMGs and not in load order
                   IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
                }
+            } else if (ext_file="cpio") {
+               install_files[A_EventInfo].is_ramdisk:=true
+               install_files[A_EventInfo].part:="RAMDISK FILE"
+               LV_Modify(A_EventInfo, "Col2", "RAMDISK FILE")
+               LV_ModifyCol(2, "AutoHdr")
+               if (install_files.MaxIndex()=A_EventInfo)
+                  GuiControl, 1:, partition, RAMDISK FILE
             }
 	     }
 		  Gui 3: +AlwaysOnTop
@@ -1715,29 +1769,23 @@ copy(any, to) {
    }
 }
 run_binary(binary, action := ""){
-    global exist_device
-    global device_mode
-	global serial
-	global general_log
+   global exist_device, device_mode, serial, general_log, cache
 	if (serial && !check_active(serial))
       return 0
 	if (device_mode="fastboot") {
 	   MsgBox, 262144, ERROR, The run_binary function is not supported from fastboot
 	   return 0
 	}
-    result := adb_shell("[ -e " """" "$(command -v " binary ")" """" " ] && echo " Format("{:U}",binary) " command support")
-	write_file(result, general_log)
-	if InStr(result, Format("{:U}",binary) " command") {
-	   if !action
-          return 1
-	   work := adb_shell("echo $(command -v " binary ")")
+   if !IsObject(cache)
+      optimize()
+	if (cache.commands.HasKey(binary)&&at:=cache.commands[binary])||(at:=Trim(adb_shell("bin=$(command -v " binary "); [ -e ""$bin"" ] && echo $bin"),"`n`r" A_Space "`t")) {
+      write_file("`n" Format("{:U}",at) " command support`n", general_log)
 	} else {
-	   if action
+      if action
 	      MsgBox, 262144, ERROR, % binary " command is not supported by device"
-	   return 0
+      return 0
 	}
-   result .= adb_shell("""" work """" " " action)
-   return result  
+   return (action) ? adb_shell("""" at """ " action) : at
 }
 ensure_tmp(needexec := ""){
    global general_log
@@ -2317,19 +2365,14 @@ update_push(img, dest, nofind := "") {
 	}
 }
 get_cmdline(prop) {
-   run_binary("cat") && cat := true
-   if !cat {
+   if !run_binary("cat") {
       MsgBox, 262144, ERROR, get_cmdline: cat command not supported on device
 	  return
    }
-   get := RegExReplace(adb_shell("cat /proc/cmdline 2>/dev/null"), "(?:^\h*|.*\h+)\Q" prop "=\E(\S+).*", "$1", result)
-   if !result {
-      get := RegExReplace(adb_shell("cat /proc/bootconfig 2>/dev/null"), "(?:^\h*|.*\R\h*)\Q" prop "\E\h*=\h*(.*?)(?:\R|$).*", "$1", result)
-   }
-   if result {
-      get:=Trim(get, A_Space "`t")
-   } else {
-      get:=""
+   get := Trim(adb_shell("temp=$(cat /proc/cmdline 2>/dev/null); try=${temp#*" prop "=}; if [ ""$temp"" = ""$try"" ]; then cat /proc/bootconfig 2>/dev/null; else echo ${try%% *}; fi"), "`n`r" A_Space "`t")
+   if InStr(get, "`n") {
+      get := RegExReplace(get, "(?:^\h*|.*\R\h*)\Q" prop "\E\h*=\h*(.*?)(?:\R|$).*", "$1", result)
+      result ? get:=Trim(get, A_Space "`t") : get:=""
    }
    return get
 }
@@ -2360,22 +2403,23 @@ get_slot() {
    return slot
 }
 find_block(name) {
-   global exist_device
-   global device_mode
-   global serial
-   global general_log
+   global exist_device, device_mode, serial, general_log, cache
    if (serial && !check_active(serial))
       return
    if (device_mode="fastboot") {
 	   MsgBox, 262144, ERROR, The find_block function is not supported from fastboot
 	   return
 	}
+   if !IsObject(cache)
+      optimize()
+   if cache.parts.HasKey(name)
+      return cache.parts[name]
    run_binary("find") && find := true
    slot := get_slot()
    if find {
-	  try := adb_shell("if [ -e ""$(command -v head)"" ]; then part=$((find /dev/block \( -type b -o -type c -o -type l \) -iname " name " -o -iname " name slot " | head -n1) 2>/dev/null); elif [ -e ""$(command -v sed)"" ]; then part=$((find /dev/block \( -type b -o -type c -o -type l \) -iname " name " -o -iname " name slot " | sed -n ""1p;q"") 2>/dev/null); fi; [ -e ""$(command -v readlink)"" ] && echo $(readlink -f ""$part"") || echo $part", "", true)
+	  try := adb_shell("if [ -e ""$(command -v head)"" ]; then part=$((find /dev/block \( -type b -o -type c -o -type l \) -iname " name " -o -iname " name slot " | head -n1) 2>/dev/null); elif [ -e ""$(command -v sed)"" ]; then part=$((find /dev/block \( -type b -o -type c -o -type l \) -iname " name " -o -iname " name slot " | sed -n ""1p;q"") 2>/dev/null); fi; [ -n ""$part"" -a -e ""$(command -v readlink)"" ] && echo $(readlink -f ""$part"") || echo $part", "", true)
 	  try := Trim(try, "`n`r" A_Space "`t")
-	  if exist_file(try) {
+	  if try && exist_file(try) {
 	     block := try
 	  } else {
 	     MsgBox, 262144, ERROR, % "Cant find " name " partition"
@@ -2942,15 +2986,18 @@ create(part, with) {
 	}
 	return 1
 }
-install(file, in, with:="", is_zip:=false) {
+install(file, in, with:="") {
    global install_files
    (!IsObject(install_files)) ? install_files:=[]
    if !InStr(FileExist(file), "A") {
       unexpected := "Cant find file: " file
 	   return 0
 	}
+   in:=Trim(in)
+   (in="ZIP FILE") ? is_zip:=true
+   (in="RAMDISK FILE") ? is_ramdisk:=true
 	try {
-      install_files.Push({file:file, part:Trim(in), extra:Trim(with), is_zip:is_zip, install:true})
+      install_files.Push({file:file, part:in, extra:Trim(with), is_zip:is_zip, is_ramdisk:is_ramdisk, install:true})
 	} catch {
       unexpected := "Cant append file: " file
       return 0
@@ -2964,8 +3011,7 @@ unlock(){
    return 1
 }
 wipe_env(reset := false) {
-   global install_files, serial
-   serial := ""
+   global install_files
    FD_CURRENT ? load_config(,,,,,true)
    install_files := [], custom_parts := []
    enable_bar()
@@ -3027,7 +3073,7 @@ Gui, Add, Text, Y+0 c00adc9 Section vheader, %name%
 Gui, Font, s10, %style%
 Gui, Add, Text, X+0 YP+10 c1FB012 vline, ------
 Gui, Add, Button, center X+0 YS+5 h30 w100 gfind_device vfind_device, Find My Device
-Gui, Add, Tab3, x%mx% Y+10 vtabs hwndtabshw Group,, Home|Reboot|Settings|Wifi|Info
+Gui, Add, Tab2, x%mx% Y+10 vtabs hwndtabshw Group +Theme -Background,, Home|Reboot|Settings|Wifi|Info
 Gui, Tab, 1
 Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5, Build: %build_author%/%build_date%
 Gui, Add, Text, YP+30 XP+10 Section, Select .IMG or Config: 
@@ -3262,7 +3308,7 @@ select:
          ext := "*." formats
       }
    }
-	(!ext) ? ext := "*.img;*.config;*.zip;*.apk"
+	(!ext) ? ext := "*.img;*.config;*.zip;*.apk;*.cpio"
 	if (part && part!="None") && (install_files[install_files.MaxIndex()].part!=part) {
       install_files[install_files.MaxIndex()].part := part
    }
@@ -3274,7 +3320,7 @@ select:
 	  if (ext="zip"||ext="apk") {
 		 print(">> Loaded ZIP: " + basename(file))
 		 GuiControl, 1:, partition, ZIP FILE
-		 install(file, "ZIP FILE",,true)
+		 install(file, "ZIP FILE")
 		 if (zip_msg!=1) {
 			help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery, so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
 			IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
@@ -3282,6 +3328,10 @@ select:
 	  } else if (ext="config") {
 		 print(">> Loaded Config: " + basename(file))
 		 read_config(file)
+     } else if (ext="cpio") {
+       print(">> Loaded RAMDISK: " + basename(file))
+		 GuiControl, 1:, partition, RAMDISK FILE
+		 install(file, "RAMDISK FILE")
 	  } else {
 		 print(">> Loaded: " + basename(file))
 		 GuiControl, 1:, partition, % simplename(file)
@@ -3364,14 +3414,35 @@ install:
 	}
 	to_install=0
    to_install_zip=0
+   to_install_ramdisk=0
    for index, file in install_files {
       if file.install {
          if file.is_zip {
             to_install_zip++
+         } else if file.is_ramdisk {
+            to_install_ramdisk++
          } else {
 			   to_install++
          }
       }
+   }
+   while (to_install_ramdisk>1)&&!question("HUH","Do you really want to install more than one Ramdisk?") {
+         MsgBox, 262144, HELP, Okay, disable unwanted Ramdisks
+         install_manager()
+         to_install_ramdisk=0
+         for index, file in install_files {
+            if file.install && file.is_ramdisk
+               to_install_ramdisk++
+         }
+   }
+   if to_install_ramdisk && (!isObject(cache)||cache.parts.HasKey("recovery")) {
+      ramdisk_dest:=Option("Ramdisk dest","The Ramdisk can be installed in Boot or in Recovery`n`nWhat do you prefer?","In Boot partition (New devices)", "In Recovery partition (Old devices)")
+      if !ramdisk_dest {
+         print(">> Aborted Ramdisk Installation!")
+         return
+      }
+   } else {
+      ramdisk_dest:=1
    }
    to_remove=0
    to_create=0
@@ -3391,11 +3462,13 @@ install:
          }
       }
    }
-	if (!to_install && !to_install_zip && !to_remove && !to_create) && (format_data!=1) {
+	if !(to_install||to_install_zip||to_install_ramdisk||to_remove||to_create) && (format_data!=1) {
 	  MsgBox, 262144, HELP, Please enable at least one action/installation
 	  return
    } else if !to_install && to_install_zip {
 	  goto recovery_install
+   } else if !to_install && to_install_ramdisk {
+      goto ramdisk_install
    }
 
 fastboot_install:
@@ -3469,9 +3542,9 @@ fastboot_install:
 	}
 
 recovery_install:
-	disable_bar()
    if !install_fail {
       if to_install_zip {
+         disable_bar()
          FD_CURRENT ? load_config("section ""before_zip""",,, FD_CURRENT)
          print(">> Loading ZIP installation")
          enable_bar()
@@ -3486,19 +3559,80 @@ recovery_install:
                }
             }
          }
-         disable_bar()
          FD_CURRENT ? load_config("section ""after_zip""",,, FD_CURRENT)
 	   }
-      if !install_fail {
-         FD_CURRENT ? load_config("section ""after_all""",,, FD_CURRENT)
-         if (reboot=1) {
-            FD_CURRENT ? load_config("section ""before_reboot""",,, FD_CURRENT)
-            gosub only_reboot
-            FD_CURRENT ? load_config("section ""after_reboot""",,, FD_CURRENT)
+   }
+
+ramdisk_install:
+	disable_bar()
+   if !install_fail {
+      if to_install_ramdisk {
+         FD_CURRENT ? load_config("section ""before_ramdisk""",,, FD_CURRENT)
+         enable_bar()
+         if (device_mode!="booted"&&device_mode!="recovery") {
+             option:=Option("Reboot menu", "Your device must be Booted or in Recovery mode for Ramdisk Installation`n`nWhat do you prefer?", "Reboot in Recovery", "Normal reboot")
+             if (option=1)
+                gosub reboot_recovery
+             else if (option=2)
+                gosub only_reboot
+             else {
+                print(">> Aborted Ramdisk Installation!")
+                return
+             }
+             print(">> Waiting device")
+             if !find_device(20) {
+                print(">> Oops! device not found"), disable_bar()
+                return
+             }
          }
-         FD_CURRENT ? load_config("section ""after""",,, FD_CURRENT)
-         print(">> Done")
+         print(">> Loading RAMDISK installation")
+         PATH := PATH ? PATH . ":/data/adb/magisk" : "/data/adb/magisk"
+         if (ramdisk_dest=1) {
+            print(">> A/B? ",false)
+            (slot:=get_slot()) ? print("YEAH") : print("NAO")
+         }
+         if !(TMP:=ensure_tmp()) {
+            print(">> Aborted Ramdisk Installation!"), disable_bar()
+            return
+         }
+         progress := Round(100/to_install_ramdisk)
+         for index, file in install_files {
+            if file.install&&file.is_ramdisk {
+               if !push(file.file, TMP . "/update_ramdisk") {
+                  install_fail := true
+                  break
+               }
+               in_file:=TMP . "/update_ramdisk/" . basename(file.file)
+               if (ramdisk_dest=1) {
+                  if (slot&&update_ramdisk(in_file,"boot_a")&&update_ramdisk(in_file,"boot_b")) || (!slot&&update_ramdisk(in_file,"boot"))  {
+                     add_progress(progress)
+                  } else {
+                     install_fail := true
+                     break
+                  }
+               } else if update_ramdisk(in_file,"recovery") {
+                  add_progress(progress)
+               } else {
+                  install_fail := true
+                  break
+               }
+            }
+         }
+         disable_bar()
+         if install_fail {
+            print(">> Aborted Ramdisk Installation!")
+            return
+         }
+         FD_CURRENT ? load_config("section ""after_ramdisk""",,, FD_CURRENT)
 	   }
+      FD_CURRENT ? load_config("section ""after_all""",,, FD_CURRENT)
+      if (reboot=1) {
+         FD_CURRENT ? load_config("section ""before_reboot""",,, FD_CURRENT)
+         gosub only_reboot
+         FD_CURRENT ? load_config("section ""after_reboot""",,, FD_CURRENT)
+      }
+      FD_CURRENT ? load_config("section ""after""",,, FD_CURRENT)
+      print(">> Done")
    }
 return
 

@@ -49,9 +49,11 @@
 >
 > **7.** Indicates that the use of `Recovery` should always be preferred for flashing `ZIP` files. Remembering that the Tool also supports flashing these files with the device booted.
 >
-> **8.** Enable all file extensions in the file selector.
+> **8.** Indicates that the use of `ADB SHELL` should always be preferred for device reboot. This increases compatibility with the device's software.
+> 
+> **9.** Enable all file extensions in the file selector.
 >
-> **9.** Indicates that a step-by-step trace of each line of a `Config Script` should be shown. This is useful to check the flow.
+> **10.** Indicates that a step-by-step trace of each line of a `Config Script` should be shown. This is useful to check the flow.
 
 
 >
@@ -63,4 +65,4 @@
 > 
 > **3.** Start wireless connection.
 >
-> **4.** Disable wireless connection. This returns to a normal search for USB devices.
+> **4.** Disable wireless connection. This returns to a normal search for USB devices

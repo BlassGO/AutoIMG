@@ -3,7 +3,7 @@
 >
 > <p align="center"> <img src="https://raw.githubusercontent.com/BlassGO/AutoIMG_Doc/main/images/tool.png"></p>
 > 
-> **1.** Search for connected devices.
+> **1.** Search for connected devices. A long press will do a hidden device search for `Fastboot`.
 > 
 > **2.** Allows you to select files for installation (One by one, the order in which they are loaded will also be the order in which they will be installed).
 > 

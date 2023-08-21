@@ -37,9 +37,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.1.0
+version = 1.1.1
 status = Beta
-build_date = 09.08.2023
+build_date = 21.08.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -376,6 +376,12 @@ ubasename(str) {
 wbasename(str) {
    return RegExReplace(str, ".*\\([^\\]+)$", "$1")
 }
+format_sh(str){
+   return RegExReplace(RegExReplace(RegExReplace(str,"m`a)^\s+|\h+$|\s+(?-m)$"), "(if|do|then|else|elif|\{|\()[ \t]*\r?\n", "$1 "), "(;[ \t]*\r?\n)|(\r?\n)", ";")
+}
+sh(str, noroot:="", noescape:="") {
+   return adb_shell(format_sh(str),noroot,noescape)
+}
 shell(action, noroot := "", noescape := "") {
    return RegExReplace(adb_shell(action, noroot, noescape), "m`a)^\s+|\h+$|\s+(?-m)$")
 }
@@ -434,11 +440,7 @@ add_progress(progress) {
    }
 }
 run_cmd(code, seconds:="") {
-   global secure_user_info
-   global current
-   global tools
-   global extras
-   global exitcode
+   global secure_user_info, current, tools, extras, exitcode
    allowed_actions := tools "\adb.exe," tools "\fastboot.exe" "," dirname(comspec) "\certutil.exe,"
    exitcode=
    if secure_user_info {
@@ -540,19 +542,10 @@ adb_serial(action, this_serial := "", seconds:="") {
 }
 adb_shell(action, noroot := "", noescape := "") {
    global PATH
+   (!noescape) ? action := StrReplace(action, "\", "\\")
+   action := StrReplace("export PATH=""$PATH:" . PATH . """;" . StrReplace(action, "`r`n"), """", "\""")
    ensure_shell()
-   if !noescape
-      action := StrReplace(action, "\", "\\")
-   action := StrReplace("export PATH=" """" "$PATH:" PATH """" ";" StrReplace(action, "`r`n"), """", "\""")
-   if !noroot
-      try := adb_serial("shell " """" "[ -e " "\""" "$(command -v su)" "\""" " ] && echo SU command support" """")
-   ensure_shell()
-   if InStr(try, "SU command") {
-	  result := adb_serial("shell " """su -c " "'" action "'" """")
-   } else {
-      result := adb_serial("shell " """" action """")
-   }
-   return result
+   return (!noroot&&InStr(adb_serial("shell ""[ -e \""$(command -v su)\"" ] && echo SU command support"""), "SU command")) ? adb_serial("shell ""su -c '" . action . "'""") : adb_serial("shell """ . action . """")
 }
 ensure_shell() {
    global adb, exist_device, device_mode, remember_mode, general_log, serial
@@ -1671,30 +1664,45 @@ push(file, dest) {
    }
    return 1
 }
-setup_busybox(tmp, dest := "") {
-   global busybox
-   global general_log
-   global busybox_work
-   busybox_work := ""
-   if !push(busybox, tmp)
+setup_busybox(to_dir, dest := "") {
+   global busybox, general_log, busybox_work, device_mode, TMP
+   busybox_work:=""
+   if (device_mode="booted") {
+      back_tmp:=TMP
+      TMP:=ensure_tmp()
+      if !push(busybox, TMP)
+         return 0
+      result := adb_shell("mkdir -p """ to_dir """ 2>/dev/null; mv -f " TMP "/" basename(busybox) " """ to_dir """")
+      TMP:=back_tmp
+   } else if !push(busybox, to_dir) {
       return 0
-   print(">> Starting " basename(busybox) "...")
-   result .= adb_shell("[ -f " """" tmp "/" basename(busybox) """" " ] && chmod 777 " tmp "/" basename(busybox) " || echo " """" "ERROR: Cant find " basename(busybox) """")
-   if dest {
-      result .= adb_shell("rm -rf " dest)
-      result .= adb_shell("mkdir -p " dest)
-      result .= adb_shell("""" tmp "/" basename(busybox) """" " --install -s " dest)
-      result .= adb_shell("[ ! -e " """" dest "/unzip" """" " ] && echo " """" "ERROR: Cant setup " basename(busybox) """")
-   } else {
-      result .= adb_shell("""" tmp "/" basename(busybox) """" " unzip --help || echo " """" "ERROR: Cant run" basename(busybox) """")
    }
+   busybox_work := to_dir "/" basename(busybox)
+   print(">> Busybox: Loading...")
+   sbusybox=
+   (
+      if [ -f "%busybox_work%" ]; then
+         chmod 777 "%busybox_work%"
+         if [ -n "%dest%" ]; then
+            rm -rf "%dest%"
+            mkdir -p "%dest%"
+            "%busybox_work%" --install -s "%dest%"
+            [ ! -e "%dest%/unzip" ] && echo "ERROR: Cant setup busybox"
+         else
+            "%busybox_work%" unzip --help || echo "ERROR: Cant setup busybox"
+         fi
+      else
+         echo "ERROR: Cant find busybox"
+      fi
+   )
+   result.=sh(sbusybox)
    if (result ~= "i)\berror|failed\b") {
+      busybox_work:=""
       write_file(result, general_log)
-	  MsgBox, 262144, ERROR, % "Cant setup " basename(busybox)
-	  return 0
+	   MsgBox, 262144, ERROR, % "Cant setup " basename(busybox)
+	   return 0
    }
-   print(">> Success")
-   busybox_work := tmp "/" basename(busybox)
+   print(">> Busybox: Success")
    return 1
 }
 busybox(action) {
@@ -1790,67 +1798,69 @@ run_binary(binary, action := ""){
    return (action) ? adb_shell("""" at """ " action) : at
 }
 ensure_tmp(needexec := ""){
-   global general_log
-   global device_mode
-   global TMP
+   global general_log, device_mode, TMP
    if needexec {
-      if (TMP ~= "^/sdcard") {
-	     result .= "`nUnable to execute scripts in """ TMP """, using ""/tmp""`n"
-         TMP := ""
+      if (TMP&&(TMP ~= "^/sdcard")) {
+         result.="`nTMP: Unable to execute scripts in " TMP "`n"
       }
+      using:="/tmp /dev/tmp__ /cache/tmp__ /mnt/tmp__ /data/tmp__ /data/local/tmp__"
    } else if (device_mode="booted") {
-      if !(TMP ~= "^/sdcard") {
-	     if TMP {
-		    result .= "`nUnable to pass files to """ TMP """ because the device is booted, using ""/sdcard/tmp""`n"
-		 }
-         TMP := "/sdcard/tmp"
+      if (TMP&&!(TMP ~= "^/sdcard")) {
+         result .= "`nTMP: Unable to pass files to " TMP " because the device is booted"
       }
+      using:="/sdcard/tmp"
+   } else {
+      using:="/tmp /dev/tmp__ /cache/tmp__ /mnt/tmp__ /data/tmp__ /data/local/tmp__"
    }
-   if !exist_dir(TMP) {
-      if TMP {
-	      create_dir(TMP)
-	   }
-	   if !exist_dir(TMP) {
-	      if TMP {
-		     result .= "`nCANT CREATE """ TMP """, using ""/tmp""`n"
-		  }
-		  TMP := "/tmp"
-		  create_dir(TMP)
-		  if !exist_dir(TMP) {
-		     result .= "`n""" TMP """ UNSUPPORTED, using ""/dev/tmp__""`n"
-		     TMP := "/dev/tmp__"
-		     create_dir(TMP)
-	      }
-	   }
-	   if !exist_dir(TMP) {
-		  result .= "`n" TMP " UNSUPPORTED`n"
-        TMP := ""
-		  write_file(result, general_log)
-		  MsgBox, 262144, ERROR, Cannot create a temp directory on the device
-		  return
-	   }
+   stmp=
+   (
+      for TMP in %using%; do
+            [ "$TMP" != "/tmp" ] && mkdir -p $TMP
+            if [ -d "$TMP" ]; then
+               echo "echo Im fine" > $TMP/tmp.sh
+               chmod 777 $TMP/tmp.sh
+               if [ -n "%needexec%" ]; then
+                  if [ "$($TMP/tmp.sh)" = "Im fine" ]; then
+                     rm -f $TMP/tmp.sh
+                     echo "TMP == $TMP"
+                     break
+                  else
+                     rm -rf $TMP
+                     echo "TMP: $TMP UNSUPPORTED"
+                  fi
+               elif [ -f "$TMP/tmp.sh" ]; then
+                  rm -f $TMP/tmp.sh
+                  echo "TMP == $TMP"
+                  break
+               else
+                  echo "TMP: $TMP is Read/Only"
+               fi
+            fi
+      done
+   )
+   result.=TMP:=sh(stmp)
+   if (_at:=InStr(TMP, "==")) {
+      TMP:=Trim(SubStr(TMP, _at+2), "`n`r" A_Space "`t")
+   } else {
+      TMP:=""
+		MsgBox, 262144, ERROR, Cannot create a temp directory on the device
    }
    write_file(result, general_log)
    return TMP
 }
 flash_zip(zip) {
-   global exist_device
-   global device_mode
-   global general_log
-   global ensure_recovery
-   global serial
+   global exist_device, device_mode, general_log, ensure_recovery, serial, busybox_work
    if (serial && !check_active(serial))
       return 0
    if !exist_device
       return 0
    if (ensure_recovery=1 && device_mode!="recovery")||(device_mode="fastboot") {
       gosub reboot_recovery
-	  adb_shell("setprop sys.usb.config mtp,adb")
+	   adb_shell("setprop sys.usb.config mtp,adb")
       adb_shell("setprop sys.usb.ffs.mtp.ready 1")
       ensure_shell()
    }
-   TMP := ensure_tmp(true)
-   if !TMP
+   if !(TMP:=ensure_tmp(true))
       return 0
    if !exist_file(zip) {
       MsgBox, 262144, ERROR, % "Cant find """ zip """ on the device"
@@ -1863,29 +1873,31 @@ flash_zip(zip) {
    if twrp && unzip {
       result .= adb_shell("twrp install " """" zip """")
    } else {
-      if !unzip && !setup_busybox(TMP)
+      if !unzip && !(busybox_work||setup_busybox(TMP))
 	     return 0
-      result .= adb_shell("rm -rf " TMP "/META-INF")
-	  print(">> Loading environment...")
-	  if unzip {
-         result .= adb_shell("unzip -qo " """" zip """" " META-INF/com/google/android/update-binary -d " TMP)
-	  } else {
-	     result .= busybox("unzip -qo " """" zip """" " META-INF/com/google/android/update-binary -d " TMP)
-      }
-      result .= adb_shell("[ -f " TMP "/META-INF/com/google/android/update-binary ] && chmod 777 " TMP "/META-INF/com/google/android/update-binary || echo ERROR: Cant extract update-binary")
-	  if (result ~= "i)\berror\b") {
+      print(">> Loading environment...")
+      szip=
+      (
+         rm -rf "%TMP%/META-INF"
+         if [ -n "%unzip%" ]; then
+            unzip -qo "%zip%" META-INF/com/google/android/update-binary -d "%TMP%" 
+         else
+            "%busybox_work%" unzip -qo "%zip%" META-INF/com/google/android/update-binary -d "%TMP%" 
+         fi
+         if [ -f "%TMP%/META-INF/com/google/android/update-binary" ]; then
+            sh "%TMP%/META-INF/com/google/android/update-binary" 3 3 "%zip%"
+         else
+            echo ERROR: Cant extract update-binary
+         fi
+      )
+	   result .= "-------------" ubasename(zip) "-------------`n" 
+	   result .= sh(szip)
+	   result .= "------------------------------------------`n"
+      if (result ~= "i)\berror:\b") {
 	     write_file(result, general_log)
 	     MsgBox, 262144, ERROR, % "Cant execute " ubasename(zip)
 	     return 0
-	  }
-	  result .= "-------------" ubasename(zip) "-------------`n" 
-	  try := adb_shell("""" TMP "/META-INF/com/google/android/update-binary" """" " 3 3 " """" zip """")
-	  if !(try ~= "inaccessible|No such file") {
-	     result .= try
-      } else {
-	     result .= adb_shell("sh " """" TMP "/META-INF/com/google/android/update-binary" """" " 3 3 " """" zip """")
-	  }
-	  result .= "------------------------------------------`n"
+	   }
    }
    write_file(result, general_log)
    return 1
@@ -1902,7 +1914,7 @@ flash_zip_push(zip) {
       return 0
    if (ensure_recovery=1 && device_mode!="recovery")||(device_mode="fastboot") {
       gosub reboot_recovery
-	  adb_shell("setprop sys.usb.config mtp,adb")
+	   adb_shell("setprop sys.usb.config mtp,adb")
       adb_shell("setprop sys.usb.ffs.mtp.ready 1")
       ensure_shell()
    }
@@ -2337,19 +2349,22 @@ update(img, dest, nofind := "") {
 	   print(">> Invalid dest partition: " dest)
 	   return 0
 	}
-	if dd {
-	   result .= run_binary("dd", "if=" """" img """" " of=" """" dest """" " && echo Success with dd")
-	}
-	if cat && !InStr(result, "Success") {
-	   result .= run_binary("cat", """" img """" " > " """" dest """" " && echo Success with cat")
-	}
-	if !InStr(result, "Success") {
-	   write_file(result, general_log)
+   supdate=
+   (
+      if [ -n "%dd%" ] && dd if="%img%" of="%dest%"; then
+         echo "%dest% updated successfully with dd"
+      elif [ -n "%cat%" ] && cat "%img%" > "%dest%"; then
+         echo "%dest% updated successfully with cat"
+      else
+         echo "ERROR: Cant install %img% in %dest%"
+   )
+   result:=sh(supdate)
+   write_file(result, general_log)
+	if InStr(result, "ERROR: ") {
 	   print(">> Cant update " ubasename(img))
-       MsgBox, 262144, ERROR, % " Some problem updating " ubasename(img) " in " dest
+      MsgBox, 262144, ERROR, % " Some problem updating " ubasename(img) " in " dest
 	   return 0
 	}
-	write_file(result, general_log)
 	return 1
 }
 update_push(img, dest, nofind := "") {
@@ -2359,8 +2374,7 @@ update_push(img, dest, nofind := "") {
     if !push(img, TMP)
        return 0
 	if update(TMP "/" basename(img), dest, nofind) {
-	   if exist_file(TMP "/" basename(img))
-	      delete_file(TMP "/" basename(img))
+      adb_shell("rm -f """ TMP "/" basename(img) """")
 	   return 1
 	} else {
 	   return 0
@@ -2388,18 +2402,25 @@ get_slot() {
 	   MsgBox, 262144, ERROR, The get_slot function is not supported from fastboot
 	   return
 	}
-   run_binary("getprop") && getprop := true
-   run_binary("cat") && cat := true
-   if cat {
-      slot := get_cmdline("androidboot.slot_suffix")
-      if !slot
-         slot := get_cmdline("androidboot.slot")
+   sslot=
+   (
+      temp=$(cat /proc/cmdline 2>/dev/null)
+      for try in androidboot.slot_suffix androidboot.slot; do
+         try=${temp#*$try=}
+         if [ "$temp" != "$try" ]; then
+            echo ${try`%`% *}
+            exit
+         fi
+      done
+      try=$(getprop ro.boot.slot_suffix 2>/dev/null)
+      [ -n "$try" ] && echo $try || cat /proc/bootconfig 2>/dev/null 
+   )
+   slot := Trim(sh(sslot), "`n`r" A_Space "`t")
+   if InStr(slot, "`n") {
+      slot := RegExReplace(slot, "(?:^\h*|.*\R\h*)(?:\Qandroidboot.slot_suffix\E|\Qandroidboot.slot\E)\h*=\h*(.*?)(?:\R|$).*", "$1", result)
+      (!result) ? slot:=""
    }
-   if getprop && !slot {
-      slot := adb_shell("getprop ro.boot.slot_suffix")
-   }
-   slot := Trim(slot, "`n`r" A_Space "`t")
-   if slot && !InStr(slot, "_") {
+   if (slot:=Trim(slot, "`n`r" A_Space "`t")) && !InStr(slot, "_") {
       slot := "_" slot
    }
    return slot
@@ -2457,89 +2478,6 @@ get_twrp_ramdisk(ramdisk) {
    return 1
    ; Possible evalaluation of errors coming soon
 }
-remove_magisk(dir) {
-   global exist_device
-   global device_mode
-   global serial
-   global general_log
-   global current
-   if (serial && !check_active(serial))
-      return 0
-   if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The remove_magisk function is not supported from fastboot
-	   return 0
-   }
-   run_binary("magiskboot") && magiskboot := true
-   run_binary("cat") && cat := true
-   if !magiskboot {
-	   MsgBox, 262144, ERROR, Your current Recovery does not support kernel patching: magiskboot
-	   return 0 
-   }
-   if !exist_file(dir "/kernel") {
-	   MsgBox, 262144, ERROR, % "Cant find the kernel in " dir
-       return 0
-   }
-   TMP := dir
-   format .= decompress(TMP "/kernel", TMP "/kernel_")
-   if format {
-      result .= "Kernel with compression: " format " n"
-   } else {
-	  result .= adb_shell("cp -f " TMP "/kernel" " " TMP "/kernel_")
-   }
-   delete_file(TMP "/kernel")
-   if !exist_file(TMP "/kernel_") {
-       write_file(result, general_log)
-	   MsgBox, 262144, ERROR, % "remove_magisk: Cant unpack the kernel"
-       return 0
-   }
-   result .= adb_shell("cd " TMP " && magiskboot split kernel_")
-   result .= adb_shell("cd " TMP " && magiskboot hexpatch kernel_ 77616E745F696E697472616D6673 736B69705F696E697472616D6673")
-   if cat && exist_file(TMP "/header") {
-      header := adb_shell("cat " TMP "/header" " || echo CANT READ")
-	  if !InStr(header, "CANT READ") {
-		 cmdline := RegExReplace(header, "(?:^|.*\R)cmdline=(.+?(?=\R)).*", "$1", cmd_result)
-       (!cmd_result) ? cmdline:=""
-	  }
-   }
-   if cmdline && InStr(cmdline, "skip_override") {
-	  Loop, parse, cmdline, %A_Space%
-      {
-	     if A_LoopField && !InStr(A_LoopField, "skip_override") {
-		    newline .= A_LoopField " "
-		 }
-      }
-	  header := RegExReplace(header, "cmdline=(.+?(?=\R))", "cmdline=" newline)
-	  result .= "NEW HEADER: `n" header "`n"
-	  FileDelete, % current "\newheader"
-	  if !write_file(header, current "\newheader")
-	     return 0
-	  if !push(current "\newheader", TMP) {
-	     write_file(result, general_log)
-         return 0
-	  }
-	  FileDelete, % current "\newheader"
-	  delete_file(TMP "/header")
-	  result .= adb_shell("cp -f " TMP "/newheader" " " TMP "/header")
-	  if !exist_file(TMP "/header") {
-	     MsgBox, 262144, ERROR, % "remove_magisk: Cant generate new header"
-	     write_file(result, general_log)
-		 return 0
-	  }
-   }
-   if format {
-	  if !recompress(TMP "/kernel_", format, TMP "/kernel")
-	     return 0
-   } else {
-	  result .= adb_shell("cp -f " TMP "/kernel_" " " TMP "/kernel")
-   }
-   if !exist_file(TMP "/kernel") {
-      MsgBox, 262144, ERROR, % "remove_magisk: Cant generate new kernel"
-	  write_file(result, general_log)
-      return 0
-   }
-   write_file(result, general_log)
-   return 1
-}
 update_ramdisk(ramdisk, part := ""){
    global exist_device
    global device_mode
@@ -2553,7 +2491,7 @@ update_ramdisk(ramdisk, part := ""){
    }
    run_binary("magiskboot") && magiskboot := true
    if !magiskboot {
-	   MsgBox, 262144, ERROR, Your current Recovery does not support boot.img building: magiskboot
+	   MsgBox, 262144, ERROR, Your current Recovery does not support boot.img building: magiskboot is needed
 	   return 0 
    }
    if !exist_file(ramdisk) {
@@ -2564,11 +2502,6 @@ update_ramdisk(ramdisk, part := ""){
    if !TMP
 	  return 0
    TMP := TMP "/update_0001"
-   delete_dir(TMP)
-   if !create_dir(TMP) {
-      MsgBox, 262144, ERROR, % "Cant create " TMP
-	  return 0
-   }
    if !part {
       print(">> Finding active boot partition")
       boot := find_block("boot")
@@ -2581,53 +2514,134 @@ update_ramdisk(ramdisk, part := ""){
 	  return 0
    }
    boot_base := ubasename(boot)
+   strymagisk=
+   (
+      if [ -f "%TMP%/kernel" ]; then
+         MAGISK_ERROR=
+         format=$(decompress kernel kernel_)
+         [ -n "$format" ] && echo KERNEL with compression: $format || cp -f kernel kernel_
+         rm -f kernel
+         if [ -n "$NMAGISK_INSTALLED" ]; then
+             magiskboot split kernel_
+             if magiskboot hexpatch kernel_ 736B69705F696E697472616D6673 77616E745F696E697472616D6673; then
+                if [ -n "$format" ]; then
+                   magiskboot compress=$format kernel_ kernel
+                else
+                   cp -f kernel_ kernel
+                fi
+                echo MAGISK restored successfully in KERNEL
+             else
+                echo Kernel seems to need no changes for MAGISK, keeping stock kernel
+                rm -f kernel
+                rm -f kernel_
+             fi
+             if [ -f .magisk ]; then
+                export $(cat .magisk)
+                for fstab in dtb extra kernel_dtb recovery_dtbo; do
+                    [ -f $fstab ] && magiskboot dtb $fstab patch
+                done
+             fi
+         elif [ -n "$MAGISK_INSTALLED" ]; then
+            if magiskboot hexpatch kernel_ 77616E745F696E697472616D6673 736B69705F696E697472616D6673; then
+               if [ -n "$format" ]; then
+                  magiskboot compress=$format kernel_ kernel
+               else
+                  cp -f kernel_ kernel
+               fi
+               echo MAGISK removed successfully in KERNEL
+            else
+               MAGISK_ERROR=true
+               echo ERROR: Cant remove MAGISK from kernel
+            fi
+            
+         else
+            echo MAGISK not detected, keeping stock kernel
+            rm -f kernel
+            rm -f kernel_
+         fi
+         format=
+      fi
+   )
+   sramdisk=
+   (
+      decompress() {
+         try=$(magiskboot decompress "$1" "$2" 2>&1)
+         f=${try#*format: [}
+         f=${f`%`%]*}
+         [ "$f" != "$try" -a "$f" != "raw" ] && echo $f
+      }
+      rm -rf "%TMP%"
+      mkdir -p "%TMP%"
+      if [ -d "%TMP%" ]; then
+         cd "%TMP%" && magiskboot unpack -h -n "%boot%"
+         if [ -f "%TMP%/ramdisk.cpio" ]; then
+            format=$(decompress ramdisk.cpio ramdisk_.cpio)
+            if [ -n "$format" ]; then
+               magiskboot cpio ramdisk_.cpio test
+               STATE=$?
+            else
+               magiskboot cpio ramdisk.cpio test
+               STATE=$?
+            fi
+            [ $STATE = 1 ] && MAGISK_INSTALLED=true
+            rm -f ramdisk.cpio
+            rm -f ramdisk_.cpio
+            if [ -n "$format" ]; then
+               echo Ramdisk with compression: $format
+               format2=$(decompress "%ramdisk%" ramdisk.cpio)
+               if [ -n "$format2" ]; then
+                  magiskboot cpio ramdisk.cpio test
+                  NSTATE=$?
+                  [ $NSTATE = 1 ] && magiskboot cpio ramdisk.cpio "extract .backup/.magisk .magisk"
+                  magiskboot compress=$format ramdisk.cpio ramdisk_.cpio
+               else
+                  magiskboot cpio "%ramdisk%" test
+                  NSTATE=$?
+                  [ $NSTATE = 1 ] && magiskboot cpio "%ramdisk%" "extract .backup/.magisk .magisk"
+                  magiskboot compress=$format "%ramdisk%" ramdisk_.cpio
+               fi
+            else
+               format2=$(decompress "%ramdisk%" ramdisk_.cpio)
+               [ -z "$format2" ] && cp -f "%ramdisk%" ramdisk_.cpio
+               magiskboot cpio ramdisk_.cpio test
+               NSTATE=$?
+               [ $NSTATE = 1 ] && magiskboot cpio ramdisk_.cpio "extract .backup/.magisk .magisk"
+            fi
+            [ $NSTATE = 1 ] && NMAGISK_INSTALLED=true
+            rm -f ramdisk.cpio
+            cp -f ramdisk_.cpio ramdisk.cpio
+
+            %strymagisk%
+
+            [ -n "$MAGISK_ERROR" ] && exit
+            if [ -f ramdisk.cpio ]; then
+               magiskboot repack "%boot%"
+               if [ -f new-boot.img ]; then
+                  if dd if=new-boot.img of="%boot%" || cat new-boot.img > "%boot%"; then
+                     echo Ramdisk updated successfully
+                  else
+                     echo "ERROR: Cant install boot.img in %boot%"
+                  fi
+               else
+                  echo ERROR: Some problem building new boot.img
+               fi
+            else
+               echo ERROR: Some problem updating new ramdisk
+            fi
+         else
+            echo "ERROR: Some problem unpacking %boot_base%"
+         fi
+      else
+         echo "ERROR: Cant create %TMP%"
+      fi
+   )
    print(">> Updating ramdisk: " boot_base)
-   result .= adb_shell("cd " TMP " && magiskboot unpack -h -n " """" boot """")
-   if !exist_file(TMP "/ramdisk.cpio") {
-      write_file(result, general_log)
-      MsgBox, 262144, ERROR, % "Some problem unpacking " boot_base
-	  return 0
-   }
-   format .= decompress(TMP "/ramdisk.cpio", TMP "/ramdisk_.cpio")
-   delete_file(TMP "/ramdisk.cpio")
-   delete_file(TMP "/ramdisk_.cpio")
-   if format {
-      result .= "Ramdisk with compression: " format "`n"
-	  format2 := decompress(ramdisk, TMP "/ramdisk.cpio")
-	  if format2 {		  
-		  if !recompress(TMP "/ramdisk.cpio", format, TMP "/ramdisk_.cpio")
-			 return 0
-	  } else {
-	     if !recompress(ramdisk, format, TMP "/ramdisk_.cpio")
-			 return 0
-	  } 
-   } else {
-      format2 := decompress(ramdisk, TMP "/ramdisk_.cpio")
-	  if !format2
-	     result .= adb_shell("cp -f " """" ramdisk """" " " TMP "/ramdisk_.cpio")
-   }
-   delete_file(TMP "/ramdisk.cpio")
-   result .= adb_shell("cp -f " TMP "/ramdisk_.cpio" " " TMP "/ramdisk.cpio")
-   if !remove_magisk(TMP)
-      return 0
-   if exist_file(TMP "/ramdisk.cpio") {
-      result .= adb_shell("cd " TMP " && magiskboot repack " """" boot """")
-	  if exist_file(TMP "/new-boot.img") {
-	     if !update(TMP "/new-boot.img", boot, true) {
-		    write_file(result, general_log)
-	        return 0
-		 }
-	  } else {
-	     write_file(result, general_log)
-	     MsgBox, 262144, ERROR, % "Some problem building new boot.img"
-	     return 0
-	  }
-   } else {
-       write_file(result, general_log)
-	   MsgBox, 262144, ERROR, % "Some problem updating new ramdisk"
+   result:=sh(sramdisk)
+   write_file(result, general_log)
+   if InStr(result, "ERROR: ") {
+	   MsgBox, 262144, ERROR, Cant update ramdisk in %boot%
 	   return 0
    }
-   write_file(result, general_log)
    return 1
 }
 update_ramdisk_push(ramdisk, part := "") {
@@ -2678,11 +2692,6 @@ update_kernel(kernel, part := ""){
    if !TMP
 	  return 0
    TMP := TMP "/update_0001"
-   delete_dir(TMP)
-   if !create_dir(TMP) {
-      MsgBox, 262144, ERROR, % "Cant create " TMP
-	  return 0
-   }
    if !part {
       print(">> Finding active boot partition")
       boot := find_block("boot")
@@ -2695,53 +2704,90 @@ update_kernel(kernel, part := ""){
 	  return 0
    }
    boot_base := ubasename(boot)
+   skernel=
+   (
+      decompress() {
+         try=$(magiskboot decompress "$1" "$2" 2>&1)
+         f=${try#*format: [}
+         f=${f`%`%]*}
+         [ "$f" != "$try" -a "$f" != "raw" ] && echo $f
+      }
+      rm -rf "%TMP%"
+      mkdir -p "%TMP%"
+      if [ -d "%TMP%" ]; then
+         cd "%TMP%" && magiskboot unpack -h -n "%boot%"
+         if [ -f "%TMP%/kernel" ]; then
+            if [ -f "%TMP%/ramdisk.cpio" ]; then
+               format=$(decompress ramdisk.cpio ramdisk_.cpio)
+               if [ -n "$format" ]; then
+                  magiskboot cpio ramdisk_.cpio test
+                  STATE=$?
+                  [ $STATE = 1 ] && magiskboot cpio ramdisk_.cpio "extract .backup/.magisk .magisk"
+               else
+                  magiskboot cpio ramdisk.cpio test
+                  STATE=$?
+                  [ $STATE = 1 ] && magiskboot cpio ramdisk.cpio "extract .backup/.magisk .magisk"
+               fi
+               [ $STATE = 1 ] && MAGISK_INSTALLED=true
+               rm -f ramdisk.cpio
+               rm -f ramdisk_.cpio
+               format=
+            fi
+            format=$(decompress kernel kernel_)
+            rm -f kernel
+            rm -f kernel_    
+            format2=$(decompress "%kernel%" kernel_)
+            [ -z "$format2" ] && cp -f "%kernel%" kernel_
+            if [ -n "$MAGISK_INSTALLED" ]; then
+               magiskboot split kernel_
+               if magiskboot hexpatch kernel_ 736B69705F696E697472616D6673 77616E745F696E697472616D6673; then
+                  echo MAGISK restored successfully in NEW KERNEL
+               else
+                  echo NEW KERNEL seems to need no changes for MAGISK
+               fi
+               if [ -f .magisk ]; then
+                  export $(cat .magisk)
+                  for fstab in dtb extra kernel_dtb recovery_dtbo; do
+                     [ -f $fstab ] && magiskboot dtb $fstab patch
+                  done
+               fi
+            else
+               echo MAGISK not detected, no additional patches required
+            fi
+            if [ -n "$format" ]; then
+               echo KERNEL with compression: $format
+               magiskboot compress=$format kernel_ kernel
+            else
+               cp -f kernel_ kernel
+            fi
+            if [ -f kernel ]; then
+               magiskboot repack "%boot%"
+               if [ -f new-boot.img ]; then
+                  if dd if=new-boot.img of="%boot%" || cat new-boot.img > "%boot%"; then
+                     echo Kernel updated successfully
+                  else
+                     echo "ERROR: Cant install boot.img in %boot%"
+                  fi
+               else
+                  echo ERROR: Some problem building new boot.img
+               fi
+            else
+               echo ERROR: Some problem updating new kernel
+            fi
+         else
+            echo "ERROR: Some problem unpacking %boot_base%"
+         fi
+      else
+         echo "ERROR: Cant create %TMP%"
+      fi
+   )
    print(">> Updating kernel: " boot_base)
-   result .= adb_shell("cd " TMP " && magiskboot unpack -h -n " """" boot """")
-   if !exist_file(TMP "/kernel") {
-      write_file(result, general_log)
-      MsgBox, 262144, ERROR, % "Some problem unpacking " boot_base
-	  return 0
-   }
-   format .= decompress(TMP "/kernel", TMP "/kernel_")
-   delete_file(TMP "/kernel")
-   delete_file(TMP "/kernel_")
-   if format {
-      result .= "Kernel with compression: " format "`n"
-	  format2 := decompress(kernel, TMP "/kernel")
-	  if format2 {		  
-		  if !recompress(TMP "/kernel", format, TMP "/kernel_")
-			 return 0
-	  } else {
-	     if !recompress(kernel, format, TMP "/kernel_")
-			 return 0
-	  }
-   } else {
-      format2 := decompress(kernel, TMP "/kernel_")
-	  if !format2
-	     result .= adb_shell("cp -f " """" kernel """" " " TMP "/kernel_")
-   }
-   delete_file(TMP "/kernel")
-   result .= adb_shell("cp -f " TMP "/kernel_" " " TMP "/kernel")
-   if !remove_magisk(TMP)
-      return 0
-   if exist_file(TMP "/kernel") {
-      result .= adb_shell("cd " TMP " && magiskboot repack " """" boot """")
-	  if exist_file(TMP "/new-boot.img") {
-	     if !update(TMP "/new-boot.img", boot, true) {
-		    write_file(result, general_log)
-	        return 0
-		 }
-	  } else {
-	     write_file(result, general_log)
-	     MsgBox, 262144, ERROR, % "Some problem building new boot.img"
-	     return 0
-	  }
-   } else {
-       write_file(result, general_log)
-	   MsgBox, 262144, ERROR, % "Some problem updating new kernel"
+   result:=sh(skernel)
+   write_file(result, general_log)
+   if InStr(result, "ERROR: ") {
+	   MsgBox, 262144, ERROR, Cant update kernel in %boot%
 	   return 0
    }
-   write_file(result, general_log)
    return 1
 }
 update_kernel_push(kernel, part := "") {

@@ -344,7 +344,7 @@ class DObj
         if GLOBAL.HasKey(key)
            return GLOBAL[key]
 		else if (key~=shared_vars)&&isSet(%key%) {
-		   return tmp:=%key%
+		   return __tmp:=%key%
 		}
     }
 	__Set(key, value) {

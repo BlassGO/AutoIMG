@@ -27,12 +27,11 @@ SetBatchLines -1
 
 Eval($x, Byref _CustomVars := "", _Init := true)
 {
-	Static _Objects, $Quote:=Chr(2), regex_expr
-	(!regex_expr) ? regex_expr:="\$\(((?:[^\" . Chr(34) . "\(\)]+|([\" . Chr(34) . "]).*?\2|\((?:[^\(\)]+|(?R))*\))+)\)"
+	Static _Objects, $Quote:=Chr(2), regex_expr, _Elements
+	(!regex_expr) ? regex_expr:="\$\(((?:[^\" . Chr(34) . "\(\)]+|([\" . Chr(34) . "]).*?\2|\((?:[^\(\)]+|(?1))*\)|(?R))+)\)"
 	
-	_Elements := {}
 	If (_Init)
-		_Objects := {}
+		_Objects := {}, _Elements := {}
 
 	; Resolve DinoCode references
 	; ExprEval() cannot parse Unicode strings, so the "real" strings are "hidden" from ExprCompile() and restored later
@@ -41,9 +40,9 @@ Eval($x, Byref _CustomVars := "", _Init := true)
 	  if unexpected
 	     return 0
 	  if IsObject($y)
-	     ObjName:="$" . A_Index . "$", _Objects[ObjName]:=$y.Clone(), $y := """<~#" . ObjName . "#~>"""
+	     ObjName:="$" . _Objects.Count()+1 . "$", _Objects[ObjName]:=$y.Clone(), $y := """<~#" . ObjName . "#~>"""
 	  else if $y is not Number
-	     HidString := "_&String" A_Index "&_", _Elements[HidString] := StrReplace($y, """", $Quote), $y := """" HidString """"
+	     HidString := "_&String" . _Elements.Count()+1 . "&_", _Elements[HidString] := StrReplace($y, """", $Quote), $y := """" . HidString . """"
 	  $x := StrReplace($x, _char, $y,, 1)
     }
 		
@@ -52,7 +51,10 @@ Eval($x, Byref _CustomVars := "", _Init := true)
     while (_pos := InStr($x, """",, _pos+_extra))
     {
 	  if (_end := InStr($x, """",, _pos+1)) {
-	      _Elements["_&String" _Elements.Count()+1 "&_"] := Substr($x, _pos+1, (_end-_pos)-1), $x := RegExReplace($x,"s).{" (_end-_pos)-1 "}", "_&String" _Elements.Count() "&_",,1,_pos+1), _extra := StrLen("_&String" _Elements.Count() "&_")+2
+		  if (SubStr($x,_pos+1,8)=="_&String")
+		      _extra:=(_end-_pos)+1
+		  else
+	         HidString := "_&String" . _Elements.Count()+1 . "&_", _Elements[HidString] := Substr($x, _pos+1, (_end-_pos)-1), $x := RegExReplace($x,"s).{" (_end-_pos)-1 "}", HidString,,1,_pos+1), _extra := StrLen(HidString)+2
 	  } else {
 		 unexpected := "A closure was expected--->"""
 		 return 0
@@ -61,18 +63,21 @@ Eval($x, Byref _CustomVars := "", _Init := true)
 	
 	; Hiding Brackets
 	While (RegExMatch($x, "\[([^\[\]]++|(?R))*\]", _Bracket))
-		_Elements["_&Bracket" A_Index "&_"] := _Bracket
-	,	$x := StrReplace($x, _Bracket, "_&Bracket" A_Index "&_",, 1)
+		Hidtmp := "_&Bracket" . _Elements.Count()+1 . "&_"
+	,   _Elements[Hidtmp] := _Bracket
+	,	$x := StrReplace($x, _Bracket, Hidtmp,, 1)
 	
 	; Hiding Braces
 	While (RegExMatch($x, "\{[^\{\}]++\}", _Brace))
-		_Elements["_&Brace" A_Index "&_"] := _Brace
-	,	$x := StrReplace($x, _Brace, "_&Brace" A_Index "&_",, 1)
+	    Hidtmp := "_&Brace" . _Elements.Count()+1 . "&_"
+	,	_Elements[Hidtmp] := _Brace
+	,	$x := StrReplace($x, _Brace, Hidtmp,, 1)
 	
 	; Hiding Parenthesis
 	While (RegExMatch($x, "\(([^()]++|(?R))*\)", _Parent))
-		_Elements["_&Parent" A_Index "&_"] := _Parent
-	,	$x := StrReplace($x, _Parent, "_&Parent" A_Index "&_",, 1)
+	    Hidtmp := "_&Parent" . _Elements.Count()+1 . "&_"
+	,	_Elements[Hidtmp] := _Parent
+	,	$x := StrReplace($x, _Parent,Hidtmp,, 1)
 	
 	; Split multiple expressions
 	$z := StrSplit($x, ",", " `t")
@@ -175,7 +180,7 @@ Eval($x, Byref _CustomVars := "", _Init := true)
 		; but ignore some insecure functions
 		While (RegExMatch($z[$i], "s)([\w%]+)\((.*?)\)", _Match))
 		{
-			$y := (skip_functions&&_Match1~=skip_functions) ? "" : %_Match1%(Eval(RestoreElements(_Match2, _Elements), _CustomVars)*)
+			$y := (skip_functions&&_Match1~=skip_functions) ? "" : %_Match1%(Eval(RestoreElements(_Match2, _Elements), _CustomVars,false)*)
 		,	ObjName := RegExReplace(_Match, "\W", "_")
 			If (IsObject($y))
 				_Objects[ObjName] := $y
@@ -235,7 +240,7 @@ ParseObjects(v_String, Byref _CustomVars := "", o_Oper :=  "", o_Value := "")
 	,	_Pos += StrLen(l_Found)
 	v_Obj := l_Matches[1]
 	if (skip_functions&&v_Obj~=skip_functions)||(skip_vars&&v_Obj~=skip_vars)
-	   return 
+	   return
 	If (_CustomVars[FD_CURRENT].HasKey(v_Obj))
 		_ArrayObject := _CustomVars[FD_CURRENT][v_Obj]
 	Else
@@ -253,7 +258,7 @@ ParseObjects(v_String, Byref _CustomVars := "", o_Oper :=  "", o_Value := "")
 		{
 			_Key := _Key[1]
 		,	_Params := Eval(l_Found1, _CustomVars, false)
-			
+
 			Try
 			{
 				If ($i = 1)
@@ -420,9 +425,9 @@ ExprEval(Byref e,Byref lp, Byref eo, Byref el)
 	c1:=Chr(1)
 	Loop,Parse,e,%c1%
 	{
-		lf:=A_LoopField,tt:=SubStr(lf,1,1),t:=SubStr(lf,2)
-		While (RegExMatch(lf,"_&String\d+&_",rm))
-		lf:=StrReplace(lf,rm,el[rm])
+		lf:=A_LoopField,tt:=SubStr(lf,1,1),t:=SubStr(lf,2),_pos:=1,_extra:=0
+		While (_pos:=RegExMatch(lf,"_&String\d+&_",rm,_pos+_extra))
+		lf:=StrReplace(lf,rm,el[rm]), _extra:=StrLen(el[rm])
 		If tt In l,v
 		lf:=Exprp1(s,lf)
 		Else{

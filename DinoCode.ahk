@@ -344,7 +344,7 @@ class DObj
         if GLOBAL.HasKey(key)
            return GLOBAL[key]
 		else if (key~=shared_vars)&&isSet(%key%) {
-		   return __tmp:=%key%
+		   return __$t$m$p:=%key%
 		}
     }
 	__Set(key, value) {
@@ -571,7 +571,7 @@ maps(key) {
 			 gui: {gui: {literal:true, max:1}},
 			 escape: {escape: {literal:true, max:1}},
 			 eval: {eval: {literal:true, max:1, ignore_func:true}},
-			 for: {for: {literal:true, max:1}, in: {support: true}}
+			 for: {for: {literal:true, max:2}, in: {support: true}}
 		   }
 		)
 	   ; Custom definitions
@@ -624,7 +624,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
    global unexpected,secure_user_info,config_tracking
    static Delimiter,Escape,last_label,main_nickname,script_section,FD,SIGNALME,_escape,_thread,_stringtmp,_result,_evaluated,read_line_,ARGS,to_return,regex_expr,regex_main,orig_block,orig_line,script
    (newmain||!isObject(FD)) ? (last_label:="",FD_CURRENT:="",unexpected:="",main_nickname:="",Delimiter:=Chr(34),Escape:=Chr(96),script_section:={},GLOBAL:={},FD:={1:new DObj()},SIGNALME:={exit:1, def:{}},_escape:=["`a","`b","`f","`n","`r`n","`r","`t","`v"],_result:=[],_evaluated:=[],_thread:={},lang(,,,,,true),gui(,,true),config_rc())
-   (!regex_expr) ? (regex_expr:="\$\(((?:[^\" . Delimiter . "\(\)]+|([\" . Delimiter . "]).*?\2|\((?:[^\(\)]+|(?R))*\))+)\)", regex_main:="([^;\s]+|;\s*[^;\s]+)\s*((?:\" . Delimiter . "[\s\S]*?\" . Delimiter . "\s*)*)")
+   (!regex_expr) ? (regex_expr:="\$\(((?:[^\" . Delimiter . "\(\)]+|([\" . Delimiter . "]).*?\2|\(([^\(\)]+|(?1))*\)|(?R))+)\)", regex_main:="([^;\s]+|;\s*[^;\s]+)\s*((?:\" . Delimiter . "[\s\S]*?\" . Delimiter . "\s*)*)")
    if configstr {
 	   local ? (outfd:=FD.MaxIndex()+1, FD[outfd]:=new DObj(local_obj), last_label ? SIGNALME.main:={[outfd]: last_label}) : FD.HasKey(from_fd) ? outfd:=from_fd : outfd:=1
 	   if (FD.MaxIndex()>=100) {
@@ -727,13 +727,32 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 			   }
 		   } else if (block_key="for") {
 			  _for:=read_line_, read_line_:=""
-			  for key, val in _for.in {
-				  FD[outfd][_for.for.1]:=val
-				  to_return:=load_config(block_capture,,,outfd,block_type)
-				  if isObject(SIGNALME.unexpected)||(SIGNALME.code&&Floor(SIGNALME.code)<=3)
-					 break
+			  if (_for.for.1~="^-?\d+$") {
+				(_for.for.2) ? FD[outfd].Index:=Index:=_for.for.1 : (FD[outfd].Index:=Index:=1, _for.for.2:=_for.for.1)
+				while,(Index<=_for.for.2) {
+				    to_return:=load_config(block_capture,,,outfd,block_type)
+					if isObject(SIGNALME.unexpected)||(SIGNALME.code&&Floor(SIGNALME.code)<=3)
+						break
+					FD[outfd].Index:=Index+=1
+				}
+			  } else if _for.for.2 {
+                for key, val in _for.in.1 {
+					FD[outfd][_for.for.1]:=key, FD[outfd][_for.for.2]:=val, FD[outfd].Index:=A_Index
+					to_return:=load_config(block_capture,,,outfd,block_type)
+					if isObject(SIGNALME.unexpected)||(SIGNALME.code&&Floor(SIGNALME.code)<=3)
+						break
+				}
+				FD[outfd][_for.for.1]:="", FD[outfd][_for.for.2]:=""
+			  } else {
+				for key, val in _for.in {
+					FD[outfd][_for.for.1]:=val, FD[outfd].Index:=A_Index
+					to_return:=load_config(block_capture,,,outfd,block_type)
+					if isObject(SIGNALME.unexpected)||(SIGNALME.code&&Floor(SIGNALME.code)<=3)
+						break
+				}
+				FD[outfd][_for.for.1]:=""
 			  }
-			  FD[outfd][_for.for.1]:=""
+			  FD[outfd].Index:=Index:=""
 		   }
 		   block_capture:="", last_label:=back_label
 		   (unexpected&&!from_type) ? from_type:=block_type
@@ -747,7 +766,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 		         return SIGNALME.hasobj ? _result[SIGNALME.hasobj] : FD[outfd].HasKey(to_return) ? FD[outfd][to_return] : Eval((to_return~="\[[&``~]_\d+_[&``~]\]") ? solve_escape(solve_escape(solve_escape(to_return, _escape), _result, "``"), _evaluated, "~") : to_return, FD)[1]
 			  }
 		   } else if (Floor(SIGNALME.code)=3) {
-			  (block_key="while"||block_key="until") ? (SIGNALME.code=3) ? SIGNALME.code:=""
+			  (block_key="while"||block_key="until"||block_key="for") ? (SIGNALME.code=3) ? SIGNALME.code:=""
 			  if SIGNALME.code
 				 return SIGNALME.exit
 		   }
@@ -758,7 +777,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 		    last_label:=back_label,read_line2:=orig_block,line:=orig_line
 			break
 	     } else {
-		    block_type:="", block_with:=""
+		    block_type:="", block_with:="", with_partial:=""
 		 }
 		 if last_line_on_block {
 		    last_line_on_block:=false
@@ -865,7 +884,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 			 }
 		 } else {
 			 (block_key="for") ? (block_result:=1, with_partial:=block_key, block_with:="") : Eval(block_with,FD)[1] ? block_result:=1 : block_result:=0
-			 (Floor(SIGNALME.code)=3&&(block_key="while"||block_key="until")) ? SIGNALME.code:=""
+			 (Floor(SIGNALME.code)=3&&(block_key="while"||block_key="until"||block_key="for")) ? SIGNALME.code:=""
 			 (block_key="until") ? block_result ? block_result:=0 : block_result:=1
 		 }
 		 if unexpected {
@@ -946,9 +965,14 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 				   if (option:=_lastoption) {
 				      if _expand {
 					      _var:=SubStr(_var,1,-1)
-					      if FD[outfd].HasKey(_var)&&isObject(FD[outfd][_var])
-						      for cont, value in FD[outfd][_var]
-							      read_line_[option].Push(value)
+					      if FD[outfd].HasKey(_var)&&isObject(FD[outfd][_var]) {
+							  if (_typeobj:=ComObjType(FD[outfd][_var]))&&(_typeobj=9||_typeobj=0xD) {
+								read_line_[option]:=FD[outfd][_var]
+							  } else {
+								for cont, value in FD[outfd][_var]
+									read_line_[option].Push(value)
+							  }
+						  }
 					  } else {
 					     _literal ? read_line_[option].Push((_literal="$"&&_result.HasKey(inkey)) ? _result[inkey] : _escape.HasKey(inkey) ? _escape[inkey] : "") : read_line_[option].Push(_number ? _var : _var3 ? FD[outfd][_var][_var3] : FD[outfd][_var])
 					  }
@@ -994,12 +1018,14 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 	 if with_partial {
 		switch (with_partial) {
 			case "for":
-                if !(read_line_[with_partial].1 ~= "^[a-zA-Z_$][a-zA-Z0-9_$]*$") {
-					unexpected:="Invalid variable name--->" . read_line_[with_partial].1
+                if !(read_line_[with_partial].1 ~= "^([a-zA-Z_$][a-zA-Z0-9_$]*|-?\d+)$") {
+					unexpected:="Invalid variable name or counter--->" . read_line_[with_partial].1
+					break
+				} else if read_line_[with_partial].2 && !(read_line_[with_partial].2 ~= "^([a-zA-Z_$][a-zA-Z0-9_$]*|-?\d+)$") {
+					unexpected:="Invalid variable name or counter--->" . read_line_[with_partial].2
 					break
 				}
 		}
-		with_partial:=""
 		continue
 	 } else if (main_type="section") {
 		last_label:=main_action

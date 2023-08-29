@@ -37,9 +37,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.1.1
+version = 1.1.2
 status = Beta
-build_date = 21.08.2023
+build_date = 29.08.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -233,8 +233,83 @@ CountMatch(str, match) {
 	   _total++, _pos+=_with
     return _total
 }
+CreateZipFile(sZip) {
+   ; Idea by shajul http://www.autohotkey.com/forum/viewtopic.php?t=65401
+	; I just ensure the use of UTF-8-RAW to avoid UTF-8 BOM leading bytes corrupting the ZIP (BlassGO)
+   global secure_user_info, HERE, TOOL
+   if (secure_user_info && !(GetFullPathName(sZip) ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
+      MsgBox, 262148, CreateZip preferences, % " Attempting to create a file outside of common paths:`n`n " sZip "`n`n Do you want to allow it?"
+      IfMsgBox No
+      {
+         return 0
+      }
+   }
+   FileDelete, % sZip
+   FileEncoding, UTF-8-RAW
+   Header1 := "PK" . Chr(5) . Chr(6)
+	VarSetCapacity(Header2, 18, 0)
+	file := FileOpen(sZip,"w")
+	file.Write(Header1)
+	file.RawWrite(Header2,18)
+	file.close()
+   return 1
+} 
+zip(FilesToZip,sZip) {
+   ; Idea by shajul http://www.autohotkey.com/forum/viewtopic.php?t=65401
+	; Improved by me (BlassGO)
+   global general_log, secure_user_info, HERE, TOOL
+   if InStr(FileExist(sZip), "A") {
+      if (secure_user_info && !(GetFullPathName(sZip) ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
+         MsgBox, 262148, Zip preferences, % " Attempting to edit file outside of common paths:`n`n " sZip "`n`n Do you want to allow it?"
+         IfMsgBox No
+         {
+            return 0
+         }
+      }
+   } else if !CreateZipFile(sZip) {
+      return 0
+   }
+   try {
+      psh := ComObjCreate( "Shell.Application")
+      zip := psh.Namespace(sZip := GetFullPathName(sZip))
+      Loop, parse, FilesToZip, `;
+      {  
+         to_zip:=A_LoopField
+         if (_type:=FileExist(to_zip)){
+            InStr(_type, "D") ? to_zip .= SubStr(to_zip,0)="\" ? "*.*" : "\*.*"
+            Loop, Files, %to_zip%, DF
+            {
+               folder := psh.Namespace(dirname(A_LoopFileLongPath))
+               name := basename(A_LoopFileLongPath)
+               is_folder := folder.ParseName(name).isFolder
+               ; Generate an integer with the date and time of the file not including the seconds (because the addition in ZIPs may have a slight time difference)
+               file_date := RegExReplace(folder.ParseName(name).ExtendedProperty("System.DateModified"), "\D|..$")
+               write_file("`nZIP: Adding """ name """ in """ sZip """`n", general_log)
+               zip.CopyHere(A_LoopFileLongPath, 4|16 )
+               Loop {
+                  for file in zip.Items()
+                  {
+                     if (file.Name=name&&file.IsFolder=is_folder) {
+                        if (file.IsFolder||RegExReplace(zip.ParseName(file.Name).ExtendedProperty("System.DateModified"), "\D|..$")=file_date)
+                           break 2
+                        break
+                     }
+                  }
+               }
+            }
+         } else {
+            write_file("`nZIP: Cant find file or folder: """ to_zip """`n", general_log)
+            return 0
+         }
+      }
+   } catch e {
+	   MsgBox, 262144, Zip, % "A fatal error occurred:`n`n" e.message "`n`n--> " e.what
+      return 0
+	}
+   return 1
+}
 unzip(sZip, sUnz, options := "-o", resolve := false) {
-    ; Idea by shajul http://www.autohotkey.com/forum/viewtopic.php?t=65401
+   ; Idea by shajul http://www.autohotkey.com/forum/viewtopic.php?t=65401
 	; Improved by me (BlassGO)
    global general_log, secure_user_info, current, HERE, TOOL
 	static zip_in_use, last_path
@@ -262,7 +337,7 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 		   last_path := sUnz
 		} else {
 		   write_file("`nUNZIP: Cant find file: """ sZip """`n", general_log)
-		   return
+		   return 0
 		}
 	}
 	try {

@@ -71,7 +71,7 @@
 ; shared_vars is a Regex that allows access to global variables, the first part "^(A_" ensures access to all AHK Native Variables (they always start with A_)
 ; If the same global variable is specified in both shared_vars and skip_vars, it implies that the global variable can be read but NOT modified.
 ;
-    global skip_functions := "i)(^(load_config|FileOpen|ParseObjects|AssignParse|DllCall|ComObj|Obj|Func|Expr|read_config))|(Object)"
+    global skip_functions := "i)(^(load_config|FileOpen|ParseObjects|AssignParse|DllCall|ComObj|Obj|Func|Expr|read_config|on_install))|(Object)"
 	global skip_vars := "i)^(skip_functions|skip_vars|shared_vars|true|false|verdadero|falso|secure_user_info|FD_CURRENT|version|build_date|winver|general_log|exitcode|GLOBAL|unexpected|current|tools|extras|HERE|TOOL|TMP|CONFIG|serial|currentdevice|device_mode|device_connection|exist_device|unlocked|fastbootd|current_slot|current_anti)$"
 	global shared_vars := "i)^(A_|(FD_CURRENT|version|build_date|winver|general_log|exitcode|CONFIG|HERE|TOOL|TMP|PATH|serial|formats|currentdevice|device_mode|device_connection|exist_device|hidden_devices|unlocked|fastbootd|current_slot|current_anti|wireless_IP|wireless_PORT|wireless_FORCE)$)"
 ;
@@ -486,6 +486,8 @@ lang(key:="",str:="",regex:=false,group:="langs",add:="",reset:=false) {
 			 save: ["guardar"],
 			 getsaved: ["obtener_guardado"],
 			 push: ["send", "enviar"],
+			 pull: ["get", "obtener"],
+			 extract: ["extraer"],
 			 install: ["instalar"],
 			 delete: ["eliminar"],
 			 create: ["crear"],
@@ -604,7 +606,12 @@ maps(key) {
 			 update_kernel: {update_kernel: {max:1, at:1, atpos:true}, in: {support:true, literal:true, max:1, at:2}},
 			 update_kernel_push: {update_kernel_push: {max:1, at:1, atpos:true}, in: {support:true, literal:true, max:1, at:2}},
 			 install_recovery_ramdisk: {install_recovery_ramdisk: {max:1, literal:true}},
-			 find_block: {find_block: {max:1, literal:true}}
+			 find_block: {find_block: {max:1, literal:true}},
+			 apktool: {apktool: {literal:true}},
+			 sign: {sign: {literal:true}},
+			 zipalign: {zipalign: {literal:true}},
+			 smali_kit: {smali_kit: {literal:true}},
+			 ls: {ls: {literal:true}}
 		  }
 	   )
 	   for k, value in maps2

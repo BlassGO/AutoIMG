@@ -37,9 +37,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.1.2
+version = 1.1.3
 status = Beta
-build_date = 29.08.2023
+build_date = 14.09.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -60,6 +60,9 @@ extras := current "\extras"
 ; Needed tools
 fastboot := tools "\fastboot.exe"
 adb := tools "\adb.exe"
+apktool := tools "\apktool.jar"
+sign := tools "\sign.jar"
+zipalign := tools "\zipalign.exe"
 busybox := extras "\busybox"
 dummy_img := extras "\dummy.img"
 
@@ -68,7 +71,7 @@ ip_check := "((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9
 
 ; Check dependencies
 Folders := current "," current "\images," tools "," extras
-Files := fastboot "," adb "," busybox "," dummy_img "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
+Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," sign "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
 Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png,"
 Loop, parse, Folders, `,
 {
@@ -209,6 +212,88 @@ text_size(txt, hwnd, font := "", size := "") {
    DllCall("ReleaseDC", "UInt", hwnd, "UInt", hdc)
    return {w: width, h: height*lines}
 }
+isBinFile(Filename,NumBytes:=32,Minimum:=4,complexunicode:=1) {
+	
+	file:=FileOpen(Filename,"r")
+	file.Position:=0 ;force position to 0 (zero)
+	nbytes:=file.RawRead(rawbytes,NumBytes) ;read bytes
+	file.Close() ;close file
+	
+	if (nbytes < Minimum) ;recommended 4 minimum for unicode detection
+		return 0 ;asume text file, if too short
+	
+	t:=0, i:=0, bytes:=[] ;Initialize vars
+	
+	loop % nbytes ;create c-style bytes array
+		bytes[(A_Index-1)]:=Numget(&rawbytes,(A_Index-1),"UChar")
+	
+	;determine BOM if possible/existant
+	if (bytes[0]=0xFE && bytes[1]=0xFF)
+		|| (bytes[0]=0xFF && bytes[1]=0xFE)
+		return 0 ;text Utf-16 BE/LE file
+	if (bytes[0]=0xEF && bytes[1]=0xBB && bytes[2]=0xBF)
+		return 0 ;text Utf-8 file
+	if (bytes[0]=0x00 && bytes[1]=0x00
+		&& bytes[2]=0xFE && bytes[3]=0xFF)
+		|| (bytes[0]=0xFF && bytes[1]=0xFE
+		&& bytes[2]=0x00 && bytes[3]=0x00)
+		return 0 ;text Utf-32 BE/LE file
+		
+	while(i<nbytes) {	
+		;// ASCII
+		if( bytes[i] == 0x09 || bytes[i] == 0x0A || bytes[i] == 0x0D
+			|| (0x20 <= bytes[i] && bytes[i] <= 0x7E) ) {
+			i += 1
+			continue
+		}
+		;// non-overlong 2-byte
+		if( (0xC2 <= bytes[i] && bytes[i] <= 0xDF)
+			&& (0x80 <= bytes[i+1] && bytes[i+1] <= 0xBF) ) {
+			i += 2
+			continue
+		}
+		;// excluding overlongs, straight 3-byte, excluding surrogates
+		if( ( bytes[i] == 0xE0 && (0xA0 <= bytes[i+1] && bytes[i+1] <= 0xBF)
+			&& (0x80 <= bytes[i+2] && bytes[i+2] <= 0xBF) )
+			|| ( ((0xE1 <= bytes[i] && bytes[i] <= 0xEC)
+			|| bytes[i] == 0xEE || bytes[i] == 0xEF)
+			&& (0x80 <= bytes[i+1] && bytes[i+1] <= 0xBF)
+			&& (0x80 <= bytes[i+2] && bytes[i+2] <= 0xBF) 	)
+			|| ( bytes[i] == 0xED && (0x80 <= bytes[i+1] && bytes[i+1] <= 0x9F)
+			&& (0x80 <= bytes[i+2] && bytes[i+2] <= 0xBF) ) ) {
+			i += 3
+			continue
+		}
+		;// planes 1-3, planes 4-15, plane 16
+		if( ( bytes[i] == 0xF0 && (0x90 <= bytes[i+1] && bytes[i+1] <= 0xBF)
+			&& (0x80 <= bytes[i+2] && bytes[i+2] <= 0xBF)
+			&& (0x80 <= bytes[i+3] && bytes[i+3] <= 0xBF) )
+			|| ( (0xF1 <= bytes[i] && bytes[i] <= 0xF3)
+			&& (0x80 <= bytes[i+1] && bytes[i+1] <= 0xBF)
+			&& (0x80 <= bytes[i+2] && bytes[i+2] <= 0xBF)
+			&& (0x80 <= bytes[i+3] && bytes[i+3] <= 0xBF) )
+			|| ( bytes[i] == 0xF4 && (0x80 <= bytes[i+1] && bytes[i+1] <= 0x8F)
+			&& (0x80 <= bytes[i+2] && bytes[i+2] <= 0xBF)
+			&& (0x80 <= bytes[i+3] && bytes[i+3] <= 0xBF) ) ) {
+			i += 4
+			continue
+		}
+		t:=1
+		break
+	}
+	
+	if (t=0) ;the while-loop has no fails, then confirmed utf-8
+		return 0
+	;else do nothing and check again with the classic method below
+	
+	loop, %nbytes% {
+		if (bytes[(A_Index-1)]<9) or (bytes[(A_Index-1)]>126)
+			or ((bytes[(A_Index-1)]<32) and (bytes[(A_Index-1)]>13))
+			return 1
+	}
+	
+	return 0
+}
 eventHandler(wParam, lParam, msg, hwnd) {
 	static WM_LBUTTONDOWN := 0x201
 	, WM_LBUTTONUP := 0x202
@@ -316,9 +401,9 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 	if !sUnz
 	   sUnz := A_ScriptDir
 	if !resolve {
-	    if (options ~= "\binside-zip\b") {
-		   RegexMatch(sZip, "^(.*?\.zip)\K.*", back_relative)
-		   RegexMatch(sZip, "^(.*?\.zip)", sZip)
+	    if (options ~= "i)\binside-zip\b") {
+		   RegexMatch(sZip, "i)^(.*?\.zip)\K.*", back_relative)
+		   RegexMatch(sZip, "i)^(.*?\.zip)", sZip)
 		}
 		if InStr(FileExist(sZip), "A") {
          if (secure_user_info && !(GetFullPathName(sUnz) ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
@@ -344,21 +429,21 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 		psh := ComObjCreate("Shell.Application")
 		zip := psh.Namespace(sZip)
 		back_opt := options
-		if RegexMatch(options, "regex:\s*\K.*", regex) {
-		   RegexMatch(options, "(.*?)(?=regex:)", options)
-		} else if RegexMatch(options, "regex-name:\s*\K.*", regex) {
+		if RegexMatch(options, "i)regex:\s*\K.*", regex) {
+		   RegexMatch(options, "i)(.*?)(?=regex:)", options)
+		} else if RegexMatch(options, "i)regex-name:\s*\K.*", regex) {
 		   regex_name := true
-		   RegexMatch(options, "(.*?)(?=regex-name:)", options)
+		   RegexMatch(options, "i)(.*?)(?=regex-name:)", options)
 		} else {
 		   regex := ".*"
 		}
-		if (options ~= "\bfiles|-f\b")
+		if (options ~= "i)\bfiles|-f\b")
 		   allow_files := true
-		if (options ~= "\bfolders|-d\b")
+		if (options ~= "i)\bfolders|-d\b")
 		   allow_folders := true
-		if (options ~= "\boverwrite|force|-o\b")
+		if (options ~= "i)\boverwrite|force|-o\b")
 		   overwrite := true
-		if (options ~= "\bmix-path|-mix|-m\b")
+		if (options ~= "i)\bmix-path|-mix|-m\b")
 		   mix := true
 		if !allow_files&&!allow_folders {
 		   allow_files := true
@@ -403,6 +488,314 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 	}
    (!resolve) ? (zip_in_use:="", last_path:="")
    return 1
+}
+check_content(options*) {
+   global general_log
+   if !InStr(FileExist(path:=GetFullPathName(options.Pop())), "A") {
+      write_file("CANT FIND: " path, general_log)
+      return 0
+   }
+   psh := ComObjCreate("Shell.Application")
+   while options.MaxIndex() {
+      relative_path:=options.RemoveAt(1), name:=basename(relative_path, false), exist:=false
+      relative_path:=path . "\" . dirname(relative_path, false)
+      try {
+         if psh.Namespace(relative_path).ParseName(name) {
+            exist:=true
+         } else {
+            break
+         }
+      } catch e {
+         write_file("ZIP: A fatal error occurred while reading: """ relative_path """--> " e.message "--> " e.what, general_log)
+         return 0
+      }
+   }
+   return exist
+}
+extract(file,dest) {
+   global CONFIG, general_log, secure_user_info, HERE, TOOL
+   if CONFIG {
+      if !InStr(FileExist(path:=GetFullPathName(CONFIG)), "A") {
+         write_file("CANT FIND: " path, general_log)
+         return 0
+      }
+      psh := ComObjCreate("Shell.Application")
+      name:=basename(file, false)
+      relative_path:=path . "\" . dirname(file, false)
+      if (secure_user_info && !(GetFullPathName(dest) ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
+         MsgBox, 262148, Unzip preferences, % " Attempting to extracting outside of common paths:`n`n " dest "`n`n Do you want to allow it?"
+         IfMsgBox No
+         {
+            return 0
+         }
+      }
+      try {
+         if (file:=psh.Namespace(relative_path).ParseName(name)) {
+            if !InStr(FileExist(dest), "D")
+               FileCreateDir, % dest
+            relative_to_zip := StrReplace(file.Path, path "\")
+            folder:=psh.Namespace(GetFullPathName(dest))
+            date_zip:=file.ExtendedProperty("System.DateModified")
+            write_file("`nUNZIP: Extracting """ relative_to_zip """ in """ dest """`n", general_log)
+            folder.CopyHere(file, 4|16)
+            Loop {
+               if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("System.DateModified")==date_zip)) {
+                  break
+               }
+            }
+         } else {
+            write_file("UNZIP: CANT FIND CONTENT: " name " in--> " relative_path, general_log)
+            return 0
+         }
+      } catch e {
+         write_file("UNZIP: A fatal error occurred while reading: """ relative_path """--> " e.message "--> " e.what, general_log)
+         return 0
+      }
+      return 1
+   } else {
+      return 0
+   }
+   
+}
+on_install(zip,checked:=false) {
+   global secure_user_info, current, anti_notspam, CONFIG
+   if !(checked||check_content("on_install.config",zip))
+      return 0
+   CONFIG:=zip, tmp:=current "\tmp"
+   FileRemoveDir, % tmp, 1
+   extract("on_install.config",tmp)
+   if load_config(read_file(tmp "\on_install.config"),,,,,true) {
+      result:=1
+   } else {
+      print(">> " basename(zip) " stopped!")
+      result:=0
+   }
+   FileDelete, % tmp "\on_install.config"
+   secure_user_info:=false, anti_notspam:=false
+   return result
+}
+ensure_java(txt:="java version") {
+   static passed
+   if passed||InStr(run_cmd("java -version"),txt) {
+      passed:=true
+      return 1
+   } else if question("Java","JAVA not detected`n`nDo you want to go to the official site?") {
+      gotolink("https://www.java.com/en/")
+   }
+   unexpected:="Java not available"
+   print(">> " unexpected)
+   return 0
+}
+apktool(options*) {
+   global apktool
+   if !ensure_java()
+      return 0
+   return run_cmd("java -jar """ apktool """ " StrJoin(options,A_Space,true))
+}
+sign(options*) {
+   global sign
+   if !ensure_java()
+      return 0
+   return run_cmd("java -jar """ sign """ " StrJoin(options,A_Space,true))
+}
+zipalign(options*) {
+   global zipalign
+   return run_cmd("""" zipalign """ " StrJoin(options,A_Space,true))
+}
+ls(options*) {
+   restore:=[]
+   while options.MaxIndex() {
+      if (SubStr(options[1],1,1)="-") {
+         switch (options.RemoveAt(1)) {
+            case "-files","-f":
+               mode.="F"
+            case "-dirs","-d":
+               mode.="D"
+            case "-recursive","-r":
+               mode.="R"
+            case "-pattern","-p":
+               pattern:=true
+         }
+      } else {
+         restore.Push(options.RemoveAt(1))
+      }
+   }
+   (restore.MaxIndex()) ? (options:=restore, restore:="") : options:={1: A_ScriptDir}
+   for cont, path in options
+   {
+      (!pattern) ? InStr(FileExist(path), "D") ? path .= SubStr(path,0)="\" ? "*.*" : "\*.*"
+      Loop, Files, %path%, %mode%
+      {
+         (files) ? files.="`n"
+         files.=A_LoopFileLongPath
+      }
+   }
+   return files
+}
+smali_kit(options*) {
+   complete_extract:=true, result:=0, to_do:={}, file_info:={}
+   while options.MaxIndex() {
+      if (SubStr(p:=options.RemoveAt(1),1,1)="-") {
+         (SubStr(options[1],1,1)!="-") ? ((p2:=options.RemoveAt(1)) ? (SubStr(options[1],1,1)!="-") ? (p3:=options.RemoveAt(1)) : p3:="") : (p2:=p3:="")
+         switch (p) {
+            case "-dir","-d","-file","-f":
+               dir:=p2
+            case "-method","-m":
+              method:=p2
+            case "-print-path","-pp":
+              print:=true, result:=""
+            case "-replace","-r":
+              to_do:={1: {rpl:p2, r:true}}
+            case "-delete-method","-dm":
+              to_do:={1: {rpl:"", r:true}}
+            case "-remake","-re":
+              to_do:={1: {rpl:p2, r:true}}, complete_extract:=false
+            case "-replace-in-method","-rim":
+              to_do.Push({orig:p2, rpl:p3}), complete_extract:=false
+            case "-delete-in-method","-dim":
+              to_do.Push({orig:p2}), complete_extract:=false
+            case "-after-line","-al":
+              to_do.Push({line:p2, add:p3, al:true}), complete_extract:=false
+            case "-before-line","-bl":
+              to_do.Push({line:p2, add:p3, bl:true}), complete_extract:=false
+            case "-name","-n":
+              opt.="name: " p2 " "
+            case "-static-name","-sn":
+              opt.="static-name: " p2 " "
+            case "-check","-c":
+              check:=true
+         }
+      }
+   }
+   (dir&&method) ? info:=StrSplit(find_str(dir,method,".end method",opt "complete_extract recursive all lines info"),"`n")
+   Loop % info.MaxIndex()
+   {
+      if InStr(info[A_Index], "PATH=") {
+         path:=SubStr(info[A_Index],StrLen("PATH=")+1), pos:=SubStr(info[A_Index+1],StrLen("POS=")+1), len:=SubStr(info[A_Index+2],StrLen("LEN=")+1)
+         content:=read_file(path)
+         check_method:=SubStr(content,pos,30)
+         if (check_method~="^\.method ")&&!(check_method~="\.method abstract|\.method public abstract") {
+            content:=SubStr(content, pos, len)
+            file_info.Push({path:path, content:(complete_extract) ? content : RegExReplace(content, "s)^[^\r?\n]*\r?\n(.*)(?:\r?\n.*$)", "$1")})
+         }
+         content:=""
+      }
+   }
+   info:=""
+   for cont, file in file_info
+   {
+      if print {
+         (result) ? result.="`n"
+         result.=file.path
+         continue
+      }
+      content:=file.content
+      for cont2, props in to_do
+      {
+         if props.r {
+            content:=props.rpl
+         } else if props.orig {
+            content:=StrReplace(content, props.orig, props.rpl)
+         } else if props.line {
+            content:=StrReplace((props.bl) ? RegExReplace(content, "`am)^(.*\Q" . props.line . "\E(?:.*)(?=$))(?:\r?\n)*(.*)$", "$1`n``~smali_kit~```n$2") : RegExReplace(content, "`am)(^|.*)(?:\r?\n)*([^\r\n]*\Q" . props.line . "\E.*)$", "$1`n``~smali_kit~```n$2"), "``~smali_kit~``", props.add)
+         }
+      }
+      content:=StrReplace(content_tmp:=read_file(file.path),file.content,content)
+      if (content=content_tmp) {
+         (check) ? print(">> Nothing: """ . file.path . """")
+      } else {
+         FileDelete(file.path)
+         if write_file(content,file.path) {
+            result:=1, (check) ? print(">> Edited: """ . file.path . """")
+         }
+      }
+      content:=content_tmp:=""
+   }
+   return result
+}
+find_str(path,str,str2:="",options:="") {
+   ; By @BlassGO
+   orig_len:=StrLen(str), orig_len2:=StrLen(str2)
+   RegexMatch(options, "i)encoding:\s*(.*)(?=\w+:|$)", opt) ? options:=StrReplace(options, opt)
+   enc:=opt1 ? Trim(opt1) : "UTF-8"
+   if RegexMatch(options, "i)name:\s*(.*)(?=\w+:|$)", opt)
+      options:=StrReplace(options, opt), name:=opt1 ? Trim(opt1) : "", literal_name:=false
+   else if RegexMatch(options, "i)static-name:\s*(.*)(?=\w+:|$)", opt) 
+      options:=StrReplace(options, opt), name:=opt1 ? Trim(opt1) : "", literal_name:=true
+   FileEncoding, % enc
+   if (options ~= "i)\bpattern\b")
+		pattern := true
+   if (options ~= "i)\ball\b")
+		all := true
+   if (options ~= "i)\binfo\b")
+		info := true
+   if (options ~= "i)\brecursive\b")
+		mode := "R"
+   if (options ~= "i)\blines\b")
+		as_lines := true
+   if (options ~= "i)\bextract\b")
+		extract := true, header:=false
+   if (options ~= "i)\bcomplete_extract\b")
+		extract := true, header:=true
+   (!pattern) ? InStr(FileExist(path), "D") ? path .= SubStr(path,0)="\" ? "*.*" : "\*.*"
+   Loop, Files, %path%, %mode%
+   {  
+      if isBinFile(A_LoopFileLongPath)||(name && !((literal_name&&name=A_LoopFileName)||(!literal_name&&InStr(A_LoopFileName,name))))
+         continue
+      _last:=1
+      FileRead, content, % A_LoopFileLongPath
+      as_lines ? tlen:=StrLen(content)
+      while (_last>0) {
+         len:=orig_len, len2:=orig_len2
+         if (_at:=InStr(content,str,,_last)) {
+            if as_lines {
+               (_startline:=InStr(content,"`n",,_at-tlen)) ? (len+=(_at-_startline)-1, _at:=_startline+1) : (_at:=RegExMatch(content, "P)[^\r\n]+", len))
+               RegExMatch(content, "P)(?:.*)(?=\r?\n|$)", line, _at+len) ? len+=line
+            }
+            if str2 {
+               if (_at2:=InStr(content,str2,,_at+len)) {
+                  if as_lines {
+                     (_startline:=InStr(content,"`n",,_at2-tlen)) ? (len2+=(_at2-_startline)-1, _at2:=_startline+1) : (_at2:=RegExMatch(content, "P)[^\r\n]+", len2))
+                     RegExMatch(content, "P)(?:.*)(?=\r?\n|$)", line, _at2+len2) ? len2+=line
+                  }
+                  (extract) ? _last:=_at2+len2 : _last:=0
+                  if info {
+                     if all
+                        result ? result.="`n" : false, result.= header ? ("PATH=" . A_LoopFileLongPath . "`nPOS=" . _at . "`nLEN=" . (_at2-_at)+len2) : ("PATH=" . A_LoopFileLongPath . "`nPOS=" . _at+len . "`nLEN=" . (_at2-_at)-len)
+                     else
+                        return header ? ("PATH=" . A_LoopFileLongPath . "`nPOS=" . _at . "`nLEN=" . (_at2-_at)+len2) : ("PATH=" . A_LoopFileLongPath . "`nPOS=" . _at+len . "`nLEN=" . (_at2-_at)-len)
+                  } else if all {
+                     result ? result.="`n" : false, result.=(extract) ? (header ? SubStr(content,_at,(_at2-_at)+len2) : SubStr(content,_at+len,(_at2-_at)-len)) : A_LoopFileLongPath
+                  } else {
+                     return (extract) ? (header ? SubStr(content,_at,(_at2-_at)+len2) : SubStr(content,_at+len,(_at2-_at)-len)) : A_LoopFileLongPath
+                  }
+               } else {
+                  _last:=0
+               }
+            } else {
+               if extract {
+                  (!as_lines) ? RegExMatch(content, "P)(?:.*)(?=\r?\n|$)", line, _at+len) ? len+=line
+                  _last:=_at+len
+               } else {
+                  _last:=0
+               }
+               if info {
+                  if all
+                     result ? result.="`n" : false, result.="PATH=" . A_LoopFileLongPath . "`nPOS=" . _at . "`nLEN=" . len
+                  else
+                     return "PATH=" . A_LoopFileLongPath . "`nPOS=" . _at . "`nLEN=" . len
+               } else if all {
+                  result ? result.="`n" : false, result.=(extract) ? SubStr(content,_at,len) : A_LoopFileLongPath
+               } else {
+                  return (extract) ? SubStr(content,_at,len) : A_LoopFileLongPath
+               }
+            }
+         } else {
+            _last:=0
+         }
+      }
+   }
+   return result
 }
 basename(str, fullpath := true) {
    if fullpath && FileExist(str) {
@@ -464,13 +857,60 @@ check_string(try, str, files := true) {
 	(files&&InStr(FileExist(try), "A")) ? try := read_file(try)
 	return (try ~= str)
 }
-write_file(content, file, enc := "") {
-   global CONFIG
-   global HERE
-   global TOOL
-   global secure_user_info
-   global general_log
-   global current
+FileCreateDir(options*) {
+   global HERE, TOOL, secure_user_info, general_log
+   for key,dir in options {
+      GetFullPathName(dir) ? dir := GetFullPathName(dir)
+      (A_Index=1) ? result:=1
+      if (secure_user_info && !(dir ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
+         MsgBox, 262148, Write preferences, % " Attempting to create a directory outside of common paths:`n`n " dir "`n`n Do you want to allow it?"
+         IfMsgBox No
+         {
+            return 0
+         }
+      }
+      if !InStr(FileExist(dir), "D")
+         FileCreateDir, % dir
+      (!InStr(FileExist(dir), "D")) ? result:=0
+   }
+   return result
+}
+FileDelete(options*) {
+   global HERE, TOOL, secure_user_info, general_log
+   for key,dir in options {
+      dir := GetFullPathName(dir), (A_Index=1) ? result:=1
+      if (secure_user_info && !(dir ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
+         MsgBox, 262148, Removal preferences, % " Attempting to delete a file outside of common paths:`n`n " dir "`n`n Do you want to allow it?"
+         IfMsgBox No
+         {
+            return 0
+         }
+      }
+      _type:=FileExist(dir)
+      if InStr(_type, "A")
+         FileDelete, % dir
+      else if InStr(_type, "D")
+         FileRemoveDir, % dir, 1
+      else
+         result:=0
+   }
+   return result
+}
+FileMove(orig,dir) {
+   global HERE, TOOL, secure_user_info, general_log
+   GetFullPathName(dir) ? dir := GetFullPathName(dir)
+   if (secure_user_info && !(dir ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
+      MsgBox, 262148, Move preferences, % " Attempting to move a file outside of common paths:`n`n " dir "`n`n Do you want to allow it?"
+      IfMsgBox No
+      {
+         return 0
+      }
+   }
+   FileMove, % orig, % dir, 1
+   return FileExist(dir)
+}
+write_file(content, file, enc := "UTF-8") {
+   global HERE, TOOL, secure_user_info, general_log, current
    GetFullPathName(file) ? file := GetFullPathName(file)
    if (file==current "\configs.ini") {
       MsgBox, 262144, Write preferences, % " Attempting to replace:`n`n " file "`n`n This action is not allowed for your security"
@@ -483,10 +923,10 @@ write_file(content, file, enc := "") {
 	     return 0
 	  }
    }
-   if !enc
-      enc=UTF-8
    try {
-      FileAppend, % content, % file, % enc
+     if !InStr(FileExist(dest:=dirname(file)), "D")
+        FileCreateDir, % dest
+     FileAppend, % content, % file, % enc
 	  return 1
    } catch {
       FileAppend, % "Cant write in: """ file """, Ended with: " ErrorLevel, % general_log, UTF-8
@@ -516,7 +956,8 @@ add_progress(progress) {
 }
 run_cmd(code, seconds:="") {
    global secure_user_info, current, tools, extras, exitcode
-   allowed_actions := tools "\adb.exe," tools "\fastboot.exe" "," dirname(comspec) "\certutil.exe,"
+   static allowed_actions
+   (!allowed_actions) ? allowed_actions := tools "\adb.exe," . tools "\fastboot.exe," . dirname(comspec) "\certutil.exe," . "java -version," . "java -jar """ tools "\apktool.jar""," . "java -jar """ tools "\sign.jar""," . tools "\zipalign.exe,"
    exitcode=
    if secure_user_info {
       Loop, parse, allowed_actions, `,
@@ -532,10 +973,9 @@ run_cmd(code, seconds:="") {
 	     {
 	        return 0
 	     }
-      } else {
-	     code .= " 2>&1"
 	  }
    }
+   code .= " 2>&1"
    back := A_DetectHiddenWindows
    DetectHiddenWindows, On
    Run, %comspec% /k,, Hide, cmdpid
@@ -598,22 +1038,11 @@ get_win_ver() {
 }
 adb(action, seconds:="") {
    global adb
-   global secure_user_info
-   if !secure_user_info
-      action .= " 2>&1"
-   result := run_cmd("""" adb """" " " action, seconds)
-   return result
+   return run_cmd("""" adb """" " " action, seconds)
 }
 adb_serial(action, this_serial := "", seconds:="") {
    global serial
-   if this_serial {
-      result := adb("-s " this_serial " " action, seconds)
-   } else if serial {
-      result := adb("-s " serial " " action, seconds)
-   } else {
-      result := 0
-   }
-   return result
+   return (this_serial) ? adb("-s " this_serial " " action, seconds) : ((serial) ? adb("-s " serial " " action, seconds) : 0)
 }
 adb_shell(action, noroot := "", noescape := "") {
    global PATH
@@ -635,23 +1064,12 @@ ensure_shell() {
 }
 fastboot(action, seconds := "") {
    global fastboot
-   global secure_user_info
-   if !secure_user_info
-      action .= " 2>&1"
    Process, Close, % basename(fastboot)
-   result := run_cmd("""" fastboot """" " " action, seconds)
-   return result
+   return run_cmd("""" fastboot """" " " action, seconds)
 }
 fastboot_serial(action, this_serial := "", seconds:="") {
    global serial
-   if this_serial {
-      result := fastboot("-s " this_serial " " action, seconds)
-   } else if serial {
-      result := fastboot("-s " serial " " action, seconds)
-   } else {
-      result := 0
-   }
-   return result
+   return (this_serial) ? fastboot("-s " this_serial " " action, seconds) : ((serial) ? fastboot("-s " serial " " action, seconds) : 0)
 }
 is_active(serial) {
    global exist_device
@@ -1617,20 +2035,20 @@ update_drivers() {
 		 {
             pass := true
 			If A_Is64bitOS && FileExist(A_LoopFileDir "/64bits.exe") {
-			   result := run_cmd("""" A_LoopFileDir "/64bits.exe" """" " 2>&1")
+			   result := run_cmd("""" A_LoopFileDir "/64bits.exe" """")
 			   break
 			} else if !A_Is64bitOS && FileExist(A_LoopFileDir "/32bits.exe") {
-			   result := run_cmd("""" A_LoopFileDir "/32bits.exe" """" " 2>&1")
+			   result := run_cmd("""" A_LoopFileDir "/32bits.exe" """")
 			   break
 			}
-			result .= run_cmd("pnputil -i -a " """" A_LoopFileLongPath """" " 2>&1")
+			result .= run_cmd("pnputil -i -a " """" A_LoopFileLongPath """")
 	     } else {
 		    nospam := true
 			IniWrite, 1, % current "\configs.ini", GENERAL, drivers
 	        break
 	     }
 	  } else {
-	     result .= run_cmd("pnputil -i -a " """" A_LoopFileLongPath """" " 2>&1")
+	     result .= run_cmd("pnputil -i -a " """" A_LoopFileLongPath """")
 	  }
    }
    if !result {
@@ -1641,20 +2059,20 @@ update_drivers() {
 			{
                pass := true
 			   If A_Is64bitOS && FileExist(A_LoopFileDir "/64bits.exe") {
-			      result := run_cmd("""" A_LoopFileDir "/64bits.exe" """" " 2>&1")
+			      result := run_cmd("""" A_LoopFileDir "/64bits.exe" """")
 			      break
 			   } else if !A_Is64bitOS && FileExist(A_LoopFileDir "/32bits.exe") {
-			      result := run_cmd("""" A_LoopFileDir "/32bits.exe" """" " 2>&1")
+			      result := run_cmd("""" A_LoopFileDir "/32bits.exe" """")
 			      break
 			   }
-			   result .= run_cmd("pnputil -i -a " """" A_LoopFileLongPath """" " 2>&1")
+			   result .= run_cmd("pnputil -i -a " """" A_LoopFileLongPath """")
 	        } else {
 			   nospam := true
 			   IniWrite, 1, % current "\configs.ini", GENERAL, drivers
 	           break
 			}
 	     } else {
-	        result .= run_cmd("pnputil -i -a " """" A_LoopFileLongPath """" " 2>&1")
+	        result .= run_cmd("pnputil -i -a " """" A_LoopFileLongPath """")
 	     }
       }
    }
@@ -1704,23 +2122,18 @@ format_data() {
    return 1
 }
 push(file, dest) {
-   global exist_device
-   global device_mode
-   global general_log
-   global ensure_recovery
-   global serial
+   global exist_device, device_mode, general_log, ensure_recovery, serial
    if (serial && !check_active(serial))
       return 0
    if !exist_device
       return 0
    if !FileExist(file) {
-      MsgBox, 262144, ERROR, % "Cant find " basename(file)
+      MsgBox, 262144, ERROR, % "Cant find " file
       return 0
    }
    if (device_mode="fastboot") {
       gosub reboot_recovery
-	  adb_shell("setprop sys.usb.config mtp,adb")
-      adb_shell("setprop sys.usb.ffs.mtp.ready 1")
+	   adb_shell("setprop sys.usb.config mtp,adb; setprop sys.usb.ffs.mtp.ready 1")
       ensure_shell()
    }
    result := adb_shell("[ ! -d " """" dest """" " ] && mkdir -p " """" dest """")
@@ -1735,6 +2148,36 @@ push(file, dest) {
    if (result ~= "i)\berror|failed\b") {
       write_file(result, general_log)
       MsgBox, 262144, ERROR, % "Unable to load " basename(file) " on the device"
+	  return 0
+   }
+   return 1
+}
+pull(file, dest) {
+   global exist_device, device_mode, general_log, ensure_recovery, serial
+   if (serial && !check_active(serial))
+      return 0
+   if !exist_device
+      return 0
+   if (device_mode="fastboot") {
+      gosub reboot_recovery
+	   adb_shell("setprop sys.usb.config mtp,adb; setprop sys.usb.ffs.mtp.ready 1")
+      ensure_shell()
+   }
+   if !exist_file(file) {
+      MsgBox, 262144, ERROR, % "Cant find " file " on the device"
+      return 0
+   }
+   FileCreateDir(dest)
+   print(">> Getting " basename(file) "...")
+   ensure_shell()
+   if (device_mode="recovery") {
+      Sleep, 1000
+      ensure_shell()
+   }
+   result .= adb_serial("pull " """" file """" " " """" dest """")
+   if (result ~= "i)\berror|failed\b") || !FileExist(dest "\" basename(file)) {
+      write_file(result, general_log)
+      MsgBox, 262144, ERROR, % "Unable to get " basename(file)
 	  return 0
    }
    return 1
@@ -1931,8 +2374,7 @@ flash_zip(zip) {
       return 0
    if (ensure_recovery=1 && device_mode!="recovery")||(device_mode="fastboot") {
       gosub reboot_recovery
-	   adb_shell("setprop sys.usb.config mtp,adb")
-      adb_shell("setprop sys.usb.ffs.mtp.ready 1")
+	   adb_shell("setprop sys.usb.config mtp,adb; setprop sys.usb.ffs.mtp.ready 1")
       ensure_shell()
    }
    if !(TMP:=ensure_tmp(true))
@@ -1989,8 +2431,7 @@ flash_zip_push(zip) {
       return 0
    if (ensure_recovery=1 && device_mode!="recovery")||(device_mode="fastboot") {
       gosub reboot_recovery
-	   adb_shell("setprop sys.usb.config mtp,adb")
-      adb_shell("setprop sys.usb.ffs.mtp.ready 1")
+	   adb_shell("setprop sys.usb.config mtp,adb; setprop sys.usb.ffs.mtp.ready 1")
       ensure_shell()
    }
    TMP := ensure_tmp()
@@ -2082,6 +2523,15 @@ check_bin(force := "") {
 
       [tools\AdbWinUsbApi.dll]
       SHA256 25207c506d29c4e8dceb61b4bd50e8669ba26012988a43fbf26a890b1e60fc97 #platform-tools 33.0.0
+
+      [tools\apktool.jar]
+      SHA256 7b4a8e1703e228d206db29644b71141687d8a111b55b039b08b02dfa443ab0f9 #apktool 2.8.1
+      
+      [tools\sign.jar]
+      SHA256 0f002a2613ad7dbc2a348fd93b01dab90321727fa6e74a9ef48a30104a5dcf67
+
+      [tools\zipalign.exe]
+      SHA256 e1669c0dbd337810224292d3a8e8cb87fb8074bde609b6bbb3dede83c99082ed
 
       [extras\busybox]
       SHA256 ccdb7753cb2f065ba1ba9a83673073950fdac7a5744741d0f221b65d9fa754d3
@@ -2212,12 +2662,12 @@ download(url, to, option:="") {
         hashtype = SHA512
 		checklen = 128
    }
-   if (option ~= "\bupdate\b") {
+   if (option ~= "i)\bupdate\b") {
       update=true
-   } else if (option ~= "\bupdate_zip\b") {
+   } else if (option ~= "i)\bupdate_zip\b") {
       update_zip=true
    }
-   if (option ~= "\bforce\b") {
+   if (option ~= "i)\bforce\b") {
       force=true
    }
    if hashtype {
@@ -2388,8 +2838,7 @@ boot(img) {
 	  unexpected := "Some problem booting " basename(img)
 	  return 0
    }
-   adb_shell("setprop sys.usb.config mtp,adb")
-   adb_shell("setprop sys.usb.ffs.mtp.ready 1")
+   adb_shell("setprop sys.usb.config mtp,adb; setprop sys.usb.ffs.mtp.ready 1")
    ensure_shell()
    return 1
 }
@@ -3131,9 +3580,12 @@ install(file, in, with:="") {
 }
 unlock(){
    global secure_user_info, skip_functions
-   if question("Unlock","Do you want to disable all security during installation?`n`nNOTE: This is not necessarily unsafe if the Script is from a trusted source.")
+   if question("Unlock","Do you want to disable all security during installation?`n`nNOTE: This is not necessarily unsafe if the Script is from a trusted source.") {
       secure_user_info:="",skip_functions:=""
-   return 1
+      return 1
+   } else {
+     return 0
+   }
 }
 wipe_env(reset := false) {
    global install_files
@@ -3443,13 +3895,18 @@ select:
 	} else {
 	  ext := extname(file)
 	  if (ext="zip"||ext="apk") {
-		 print(">> Loaded ZIP: " + basename(file))
-		 GuiControl, 1:, partition, ZIP FILE
-		 install(file, "ZIP FILE")
-		 if (zip_msg!=1) {
-			help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
-			IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
-		 }
+       if (ext="zip") && check_content("on_install.config",file) {
+          print(">> Loaded Config: " + basename(file))
+          on_install(file,true)
+       } else {
+         print(">> Loaded ZIP: " + basename(file))
+         GuiControl, 1:, partition, ZIP FILE
+         install(file, "ZIP FILE")
+         if (zip_msg!=1) {
+            help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
+            IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
+         }
+       }
 	  } else if (ext="config") {
 		 print(">> Loaded Config: " + basename(file))
 		 read_config(file)

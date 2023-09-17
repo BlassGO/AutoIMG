@@ -12,6 +12,7 @@ SetBatchLines -1
 #include cell_edit.ahk
 #include http.ahk
 #include header_color.ahk
+#include edit_color.ahk
 
 ; AHK2 configs
 ;@Ahk2Exe-SetName         AutoIMG
@@ -37,9 +38,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.1.3
+version = 1.2.0
 status = Beta
-build_date = 14.09.2023
+build_date = 17.09.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -512,6 +513,99 @@ check_content(options*) {
    }
    return exist
 }
+FileDeleteZip(options*) {
+   global general_log, secure_user_info, HERE, TOOL
+   if !InStr(FileExist(path:=GetFullPathName(options.Pop())), "A") {
+      write_file("CANT FIND: " path, general_log)
+      return 0
+   }
+   if secure_user_info && !(path ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))") {
+      MsgBox, 262148, Unzip preferences, % " Attempting to delete a file from:`n`n " path "`n`n Do you want to allow it?"
+      IfMsgBox No
+      {
+         return 0
+      }
+   }
+   psh := ComObjCreate("Shell.Application")
+   dest := current "\tmp\FileDeleteZip"
+   FileCreateDir, % dest
+   folder := psh.Namespace(dest)
+   while options.MaxIndex() {
+      relative_path:=options.RemoveAt(1), name:=basename(relative_path, false)
+      relative_path:=path . "\" . dirname(relative_path, false)
+      try {
+         if (file:=psh.Namespace(relative_path).ParseName(name)) {
+            relative_to_zip := StrReplace(file.Path, path "\")
+            date_zip:=file.ExtendedProperty("System.DateModified")
+            write_file("`nUNZIP: Deleting """ relative_to_zip """`n", general_log)
+            folder.MoveHere(file, 4|16)
+            Loop {
+               if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("System.DateModified")==date_zip)) {
+                  break
+               }
+            }
+            FileDelete, % dest "\" name
+         } else {
+            write_file("UNZIP: CANT FIND CONTENT: " name " in--> " relative_path, general_log)
+            return 0
+         }
+      } catch e {
+         write_file("UNZIP: A fatal error occurred while reading: """ relative_path """--> " e.message "--> " e.what, general_log)
+         return 0
+      }
+   }
+   FileRemoveDir, % dest, 1
+   return exist
+}
+FileMoveZip(file,dest,zip) {
+   global general_log, secure_user_info, HERE, TOOL
+   if !InStr(FileExist(path:=GetFullPathName(zip)), "A") {
+      write_file("CANT FIND: " path, general_log)
+      return 0
+   }
+   psh := ComObjCreate("Shell.Application")
+   name:=basename(file, false)
+   relative_path:=path . "\" . dirname(file, false)
+   if (secure_user_info) {
+      if !(GetFullPathName(dest) ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))") {
+         MsgBox, 262148, Unzip preferences, % " Attempting to extracting outside of common paths:`n`n " dest "`n`n Do you want to allow it?"
+         IfMsgBox No
+         {
+            return 0
+         }
+      }
+      if !(path ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))") {
+         MsgBox, 262148, Unzip preferences, % " Attempting to move a file from:`n`n " path "`n`n Do you want to allow it?"
+         IfMsgBox No
+         {
+            return 0
+         }
+      }
+   }
+   try {
+      if (file:=psh.Namespace(relative_path).ParseName(name)) {
+         if !InStr(FileExist(dest), "D")
+            FileCreateDir, % dest
+         relative_to_zip := StrReplace(file.Path, path "\")
+         folder:=psh.Namespace(GetFullPathName(dest))
+         date_zip:=file.ExtendedProperty("System.DateModified")
+         write_file("`nUNZIP: Moving """ relative_to_zip """ to """ dest """`n", general_log)
+         folder.MoveHere(file, 4|16)
+         Loop {
+            if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("System.DateModified")==date_zip)) {
+               break
+            }
+         }
+      } else {
+         write_file("UNZIP: CANT FIND CONTENT: " name " in--> " relative_path, general_log)
+         return 0
+      }
+   } catch e {
+      write_file("UNZIP: A fatal error occurred while reading: """ relative_path """--> " e.message "--> " e.what, general_log)
+      return 0
+   }
+   return 1
+}
 extract(file,dest) {
    global CONFIG, general_log, secure_user_info, HERE, TOOL
    if CONFIG {
@@ -555,7 +649,6 @@ extract(file,dest) {
    } else {
       return 0
    }
-   
 }
 on_install(zip,checked:=false) {
    global secure_user_info, current, anti_notspam, CONFIG
@@ -601,6 +694,12 @@ sign(options*) {
 zipalign(options*) {
    global zipalign
    return run_cmd("""" zipalign """ " StrJoin(options,A_Space,true))
+}
+run_cmd_literal(options*) {
+   return run_cmd(options.RemoveAt(1) . " " . StrJoin(options,A_Space,true))
+}
+shell_literal(options*) {
+   return shell(StrJoin(options,A_Space,true))
 }
 ls(options*) {
    restore:=[]
@@ -899,15 +998,41 @@ FileDelete(options*) {
 FileMove(orig,dir) {
    global HERE, TOOL, secure_user_info, general_log
    GetFullPathName(dir) ? dir := GetFullPathName(dir)
-   if (secure_user_info && !(dir ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
-      MsgBox, 262148, Move preferences, % " Attempting to move a file outside of common paths:`n`n " dir "`n`n Do you want to allow it?"
-      IfMsgBox No
-      {
-         return 0
+   orig := GetFullPathName(orig)
+   if (secure_user_info) {
+      if !(dir ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))") {
+         MsgBox, 262148, Move preferences, % " Attempting to move a file outside of common paths:`n`n " dir "`n`n Do you want to allow it?"
+         IfMsgBox No
+         {
+            return 0
+         }
+      }
+      if !(orig ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))") {
+         MsgBox, 262148, Move preferences, % " Attempting to move a file from:`n`n " orig "`n`n Do you want to allow it?"
+         IfMsgBox No
+         {
+            return 0
+         }
       }
    }
    FileMove, % orig, % dir, 1
    return FileExist(dir)
+}
+FileSelectFile(title:="",filter:="",rootdir:="",options:="") {
+   try {
+      FileSelectFile, result, % options, % rootdir, % title, % filter
+   } catch {
+      return 0
+   }
+   return result
+}
+FileSelectFolder(prompt:="",rootdir:="",options:="") {
+   try {
+      FileSelectFolder, result, % rootdir, % options, % prompt
+   } catch {
+      return 0
+   }
+   return result
 }
 write_file(content, file, enc := "UTF-8") {
    global HERE, TOOL, secure_user_info, general_log, current
@@ -3697,9 +3822,13 @@ Gui, Add, Checkbox, XP Y+4 vall_formats gsave_preferences, Enable all file forma
 Gui, Add, Checkbox, XP Y+4 vconfig_tracking gsave_preferences AltSubmit, Enable Config Tracking
 Gui, Tab, 4
 Gui, Font, s10, Arial Black
-Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5 Section, Wireless Connetion
+Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5 Section, Remote Script
 Gui, Font, s10, %style%
-Gui, Add, Text, YP+30 XP+10 , Although ADB supports Wi-Fi connection,`nit is not recommended due to network failures,`nslower processes and the requirement of the`nUSB Cable prior to the wireless connection`n(The use of USB depends on the device)
+Gui, Add, Text, YP+30 XP+10 , Run a Config-Script from a URL:
+Gui, Font, s10, Arial Black
+Gui, Add, Edit, center XP YP+20 h20 w260 vfromurl hwndfromurlid,
+Gui, Font, s10, %style%
+Gui, Add, Button, center XP+75 Y+10 h40 w100 gfromurl, Run
 Gui, Font, s10, Arial Black
 Gui, Add, GroupBox, XS Y+10 h%boxH% w%boxW% c254EC5, TCP/IP
 Gui, Font, s10, %style%
@@ -3735,6 +3864,7 @@ WinGetPos, toolX, toolY, toolW, toolH, ahk_id %toolid%
 OnMessage(WM_LBUTTONDOWN := 0x201, "eventHandler")
 OnMessage(WM_LBUTTONUP := 0x202, "eventHandler")
 OnMessage(WM_LBUTTONDBLCLK := 0x203, "eventHandler")
+CtlColor_Edit(fromurlid,0xE4F4F4, 0x12A1A1)
 OnExit, GuiClose
 enable_bar()
 disable_bar()
@@ -3776,7 +3906,7 @@ connect:
 	   return
 	}
 	IniRead, preferences, % current "\configs.ini", GENERAL, preferences, 0
-	if (preferences==1) {
+	if (preferences=1) {
 	   IniWrite, %ip%, % current "\configs.ini", GENERAL, ip
 	   IniWrite, %port%, % current "\configs.ini", GENERAL, port
 	}
@@ -3786,8 +3916,20 @@ connect:
 return
 
 disconnect:
-wireless_IP := "", wireless_PORT := "", wireless_FORCE  := false
-print(">> TCP/IP: Disabled")
+   wireless_IP := "", wireless_PORT := "", wireless_FORCE  := false
+   print(">> TCP/IP: Disabled")
+return
+
+fromurl:
+   Gui, 1:Submit, NoHide
+   if fromurl {
+      IniRead, preferences, % current "\configs.ini", GENERAL, preferences, 0
+      if (preferences=1) {
+         IniWrite, %fromurl%, % current "\configs.ini", GENERAL, fromurl
+      }
+      web_config(fromurl, 3000, true)
+      load_config(,,,,,true)
+   }
 return
 
 clean:
@@ -3848,9 +3990,11 @@ update_preferences:
 		IniRead, default_mode, % current "\configs.ini", GENERAL, default_mode, 1
 		IniRead, default_slot, % current "\configs.ini", GENERAL, default_slot, auto
 		IniRead, config_tracking, % current "\configs.ini", GENERAL, config_tracking, 0
-		IniRead, ip, % current "\configs.ini", GENERAL, ip, 0
+      IniRead, ip, % current "\configs.ini", GENERAL, ip, 0
+		IniRead, fromurl, % current "\configs.ini", GENERAL, fromurl, 0
 		IniRead, port, % current "\configs.ini", GENERAL, port, 5555
       (!ip) ? ip:=""
+      (!fromurl) ? fromurl:=""
 		GuiControl, 1:, preferences, %preferences%
 		GuiControl, 1:, disable_verify, %disable_verify%
 		GuiControl, 1:, reboot, %reboot%
@@ -3863,6 +4007,7 @@ update_preferences:
 		GuiControl, 1:Choose, default_mode, %default_mode%
 		GuiControl, 1:, default_slot, %default_slot%
 		GuiControl, 1:, config_tracking, %config_tracking%
+      GuiControl, 1:, fromurl, %fromurl%
 		GuiControl, 1:, ip, %ip%
 		GuiControl, 1:, port, %port%
 	}

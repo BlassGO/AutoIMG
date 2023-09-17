@@ -611,7 +611,11 @@ maps(key) {
 			 sign: {sign: {literal:true}},
 			 zipalign: {zipalign: {literal:true}},
 			 smali_kit: {smali_kit: {literal:true}},
-			 ls: {ls: {literal:true}}
+			 ls: {ls: {literal:true}},
+			 run_cmd_literal: {run_cmd_literal: {literal:true}},
+			 shell_literal: {shell_literal: {literal:true}},
+			 FileSelectFile: {FileSelectFile: {max:2, at:"1,4", atpos:true}, with: {support:true, max:1, at:2}, in: {support:true, max:1, at:3}},
+			 FileSelectFolder: {FileSelectFolder: {max:2, at:"1,3", atpos:true}, in: {support:true, max:1, at:2}}
 		  }
 	   )
 	   for k, value in maps2

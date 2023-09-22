@@ -201,7 +201,13 @@ press(key) {
    }
    return 1
 }
-gui(do:="",onevent:="",reset:=false) {
+GuiControl(do) {
+	Gui(,,,do)
+}
+GuiControlGet(do) {
+	Gui(,,,,do)
+}
+Gui(do:="",onevent:="",reset:=false,control:="",controlget:="") {
    static
    local args:=0, _label, _var, _random
    (reset||!isObject(labels)) ? (labels:={},vars:=[])
@@ -215,7 +221,7 @@ gui(do:="",onevent:="",reset:=false) {
 			  if (_at:=InStr(do[1],"return"))&&(_return:=Trim(SubStr(do[1],_at+6)))
 				 return _return:=%_return%
 		   }
-		   if (args>=3) {
+		   if (args>=3) && InStr(do[1],"Add") {
 		      RegexMatch(do[3],"v\K\S+",_var) ? (GLOBAL[_var]:="",vars.Push(_var))
 			  if RegexMatch(do[3],"g\S+",_label) {
 			     if !_var {
@@ -224,9 +230,10 @@ gui(do:="",onevent:="",reset:=false) {
                  }
 				 do[3]:=StrReplace(do[3],_label,"g__DinoGui__",, 1), labels[_var]:=SubStr(_label,2)
 			  }
+			  is_control:=true
 		   }
 		   Gui, % do[1], % do[2], % do[3], % do[4]
-		   RegexMatch(do[3],"hwnd\K\S+",_var) ? (GLOBAL[_var]:=%_var%)
+		   (is_control&&RegexMatch(do[3],"hwnd\K\S+",_var)) ? (GLOBAL[_var]:=%_var%)
 		   if InStr(do[1],"submit")
 		      for cont, value in vars
                   GLOBAL[value]:=%value%, %value%:=""
@@ -235,6 +242,29 @@ gui(do:="",onevent:="",reset:=false) {
 	   }
    } else if onevent && labels.HasKey(onevent){
        load_config(labels[onevent],,, FD_CURRENT, "resolve")
+   } else if control {
+		do:=StrSplit(control,",",,3)
+		for cont, value in do
+			do[cont]:=Trim(value)
+		try {
+			GuiControl, % do[1], % do[2], % do[3]
+		} catch e {
+			unexpected:=e.message
+		}
+   } else if controlget {
+	    do:=StrSplit(controlget,",",,4)
+		for cont, value in do
+			do[cont]:=Trim(value)
+		try {
+			GuiControlGet, _OutputVar, % do[2], % do[3], % do[4]
+			if InStr(do[2],"Pos") {
+               GLOBAL[do.1 . "X"]:=_OutputVarX, GLOBAL[do.1 . "Y"]:=_OutputVarY, GLOBAL[do.1 . "W"]:=_OutputVarW, GLOBAL[do.1 . "H"]:=_OutputVarH
+			} else {
+               GLOBAL[do.1]:=_OutputVar
+			}
+		} catch e {
+			unexpected:=e.message
+		}
    }
    return
 }
@@ -509,23 +539,50 @@ lang(key:="",str:="",regex:=false,group:="langs",add:="",reset:=false) {
 	   )
    }
    if (add&&group) {
-      custom[group]:={}, to_return:=0, _pos:=1
+      custom[group]:={}, to_add:={}, to_return:=0, _pos:=1
       while,(_pos:=RegexMatch(add,"([a-zA-Z_$][a-zA-Z0-9_$]*)(?:[\s=]+(?:\[\s*((?:[^\s\,\]]+[\s\,]*)+)\]))?\s*(?:\,|$)",_with,_pos+StrLen(_with))) {
 		if (_with1=group) {
 		   if _with2 {
-			   custom_main[group]:=[], to_return:=2
+			   custom_main[group]:=[], to_add[_with1]:={}, to_return:=2
 			   Loop, parse, _with2, % A_Space . ","""
-				  A_LoopField ? custom_main[group].Push(StrUnmark(A_LoopField))
+			   {
+			       if A_LoopField {
+					  if (_at:=InStr(A_LoopField,"="))&&(_prop:=SubStr(A_LoopField,1,_at-1)) {
+						  if (_prop~="^[a-zA-Z_$][a-zA-Z0-9_$]*$") {
+						     to_add[_with1][_prop]:=SubStr(A_LoopField,_at+1), maps:=true
+						  } else {
+							 unexpected:="Invalid Prop name--->" . _prop
+							 break 2
+						  }
+					  } else {
+					     custom_main[group].Push(StrUnmark(A_LoopField))
+					  }
+				   }
+			   }
 		   }
 		} else {
-			custom[group][_with1]:=[StrUnmark(_with1)], (!to_return) ? to_return:=1
-			if _with2
+			custom[group][_with1]:=[StrUnmark(_with1)], to_add[_with1]:={}, (!to_return) ? to_return:=1
+			if _with2 {
 			   Loop, parse, _with2, % A_Space . ","""
-				  A_LoopField ? custom[group][_with1].Push(StrUnmark(A_LoopField))
+			   {
+			      if A_LoopField {
+					  if (_at:=InStr(A_LoopField,"="))&&(_prop:=SubStr(A_LoopField,1,_at-1)) {
+						  if (_prop~="^[a-zA-Z_$][a-zA-Z0-9_$]*$") {
+						     to_add[_with1][_prop]:=SubStr(A_LoopField,_at+1), maps:=true
+						  } else {
+							 unexpected:="Invalid Prop name--->" . _prop
+							 break 2
+						  }
+					  } else {
+					     custom[group][_with1].Push(StrUnmark(A_LoopField))
+					  }
+				   }
+			   }
+		    }
 		}
-
 	  }
 	  (!to_return) ? (unexpected:="Invalid Conector definition--->" . add)
+	  (!unexpected) ? (maps ? maps(group,to_add))
 	  return to_return
    }
    if (group="custom") {
@@ -554,9 +611,9 @@ lang(key:="",str:="",regex:=false,group:="langs",add:="",reset:=false) {
 	   }
    }
 }
-maps(key) {
+maps(key:="",add:="",reset:=false) {
    static maps
-   if !isObject(maps) {
+   if reset||!isObject(maps) {
        ; AHK does not support very long expressions, it is necessary to split the object
        maps:=
        (join
@@ -612,6 +669,7 @@ maps(key) {
 			 zipalign: {zipalign: {literal:true}},
 			 smali_kit: {smali_kit: {literal:true}},
 			 ls: {ls: {literal:true}},
+			 7za: {7za: {literal:true}},
 			 run_cmd_literal: {run_cmd_literal: {literal:true}},
 			 shell_literal: {shell_literal: {literal:true}},
 			 FileSelectFile: {FileSelectFile: {max:2, at:"1,4", atpos:true}, with: {support:true, max:1, at:2}, in: {support:true, max:1, at:3}},
@@ -622,6 +680,17 @@ maps(key) {
 	       maps[k]:=value
 	   for k, value in maps3
 	       maps[k]:=value
+   }
+   if (key&&add) {
+      (!isObject(maps[key])) ? maps[key]:={}
+	  for k, value in add {
+		if isObject(maps[key][k]) {
+           for k2, value2 in value
+		      maps[key][k][k2]:=value2
+		} else {
+		   maps[key][k]:=value
+		}
+	  }
    }
    return maps[key]
 }
@@ -634,7 +703,7 @@ solve_escape(Byref str,Byref from:="",key:="&") {
 load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",newmain:=false) {
    global unexpected,secure_user_info,config_tracking
    static Delimiter,Escape,last_label,main_nickname,script_section,FD,SIGNALME,_escape,_thread,_stringtmp,_result,_evaluated,read_line_,ARGS,to_return,regex_expr,regex_main,orig_block,orig_line,script
-   (newmain||!isObject(FD)) ? (last_label:="",FD_CURRENT:="",unexpected:="",main_nickname:="",Delimiter:=Chr(34),Escape:=Chr(96),script_section:={},GLOBAL:={},FD:={1:new DObj()},SIGNALME:={exit:1, def:{}},_escape:=["`a","`b","`f","`n","`r`n","`r","`t","`v"],_result:=[],_evaluated:=[],_thread:={},lang(,,,,,true),gui(,,true),config_rc())
+   (newmain||!isObject(FD)) ? (last_label:="",FD_CURRENT:="",unexpected:="",main_nickname:="",Delimiter:=Chr(34),Escape:=Chr(96),script_section:={},GLOBAL:={},FD:={1:new DObj()},SIGNALME:={exit:1, def:{}},_escape:=["`a","`b","`f","`n","`r`n","`r","`t","`v"],_result:=[],_evaluated:=[],_thread:={},lang(,,,,,true),maps(,,true),gui(,,true),config_rc())
    (!regex_expr) ? (regex_expr:="\$\(((?:[^\" . Delimiter . "\(\)]+|([\" . Delimiter . "]).*?\2|\(([^\(\)]+|(?1))*\)|(?R))+)\)", regex_main:="([^;\s]+|;\s*[^;\s]+)\s*((?:\" . Delimiter . "[\s\S]*?\" . Delimiter . "\s*)*)")
    if configstr {
 	   local ? (outfd:=FD.MaxIndex()+1, FD[outfd]:=new DObj(local_obj), last_label ? SIGNALME.main:={[outfd]: last_label}) : FD.HasKey(from_fd) ? outfd:=from_fd : outfd:=1
@@ -737,7 +806,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 					 unexpected:="Invalid syntax\logic"
 			   }
 		   } else if (block_key="for") {
-			  _for:=read_line_, read_line_:=""
+			  _for:=read_line_, read_line_:="", _for_vars:={}
 			  if (_for.for.1~="^-?\d+$") {
 				(_for.for.2) ? FD[outfd].Index:=Index:=_for.for.1 : (FD[outfd].Index:=Index:=1, _for.for.2:=_for.for.1)
 				while,(Index<=_for.for.2) {
@@ -753,7 +822,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 					if isObject(SIGNALME.unexpected)||(SIGNALME.code&&Floor(SIGNALME.code)<=3)
 						break
 				}
-				FD[outfd][_for.for.1]:="", FD[outfd][_for.for.2]:=""
+				_for_vars.Push(_for.for.1), _for_vars.Push(_for.for.2)
 			  } else {
 				for key, val in _for.in {
 					FD[outfd][_for.for.1]:=val, FD[outfd].Index:=A_Index
@@ -761,9 +830,9 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 					if isObject(SIGNALME.unexpected)||(SIGNALME.code&&Floor(SIGNALME.code)<=3)
 						break
 				}
-				FD[outfd][_for.for.1]:=""
+				_for_vars.Push(_for.for.1)
 			  }
-			  FD[outfd].Index:=Index:=""
+			  _for:=""
 		   }
 		   block_capture:="", last_label:=back_label
 		   (unexpected&&!from_type) ? from_type:=block_type
@@ -788,6 +857,11 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 		    last_label:=back_label,read_line2:=orig_block,line:=orig_line
 			break
 	     } else {
+			if (block_key="for") {
+               for key, val in _for_vars
+			       FD[outfd][val]:=""
+			   FD[outfd].Index:=Index:=_for_vars:=""
+			}
 		    block_type:="", block_with:="", with_partial:=""
 		 }
 		 if last_line_on_block {

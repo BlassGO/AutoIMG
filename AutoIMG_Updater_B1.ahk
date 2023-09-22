@@ -38,9 +38,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.2.0
+version = 1.2.1
 status = Beta
-build_date = 17.09.2023
+build_date = 21.09.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -64,6 +64,7 @@ adb := tools "\adb.exe"
 apktool := tools "\apktool.jar"
 sign := tools "\sign.jar"
 zipalign := tools "\zipalign.exe"
+7za := tools "\7za.exe"
 busybox := extras "\busybox"
 dummy_img := extras "\dummy.img"
 
@@ -72,7 +73,7 @@ ip_check := "((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9
 
 ; Check dependencies
 Folders := current "," current "\images," tools "," extras
-Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," sign "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
+Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," 7za "," sign "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
 Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png,"
 Loop, parse, Folders, `,
 {
@@ -367,7 +368,6 @@ zip(FilesToZip,sZip) {
             {
                folder := psh.Namespace(dirname(A_LoopFileLongPath))
                name := basename(A_LoopFileLongPath)
-               is_folder := folder.ParseName(name).isFolder
                ; Generate an integer with the date and time of the file not including the seconds (because the addition in ZIPs may have a slight time difference)
                file_date := RegExReplace(folder.ParseName(name).ExtendedProperty("System.DateModified"), "\D|..$")
                write_file("`nZIP: Adding """ name """ in """ sZip """`n", general_log)
@@ -375,7 +375,7 @@ zip(FilesToZip,sZip) {
                Loop {
                   for file in zip.Items()
                   {
-                     if (file.Name=name&&file.IsFolder=is_folder) {
+                     if (file.Name=name) {
                         if (file.IsFolder||RegExReplace(zip.ParseName(file.Name).ExtendedProperty("System.DateModified"), "\D|..$")=file_date)
                            break 2
                         break
@@ -606,10 +606,10 @@ FileMoveZip(file,dest,zip) {
    }
    return 1
 }
-extract(file,dest) {
+extract(file,dest,zip:="") {
    global CONFIG, general_log, secure_user_info, HERE, TOOL
-   if CONFIG {
-      if !InStr(FileExist(path:=GetFullPathName(CONFIG)), "A") {
+   if CONFIG||zip {
+      if !InStr(FileExist(path:=GetFullPathName(CONFIG ? CONFIG : zip)), "A") {
          write_file("CANT FIND: " path, general_log)
          return 0
       }
@@ -694,6 +694,10 @@ sign(options*) {
 zipalign(options*) {
    global zipalign
    return run_cmd("""" zipalign """ " StrJoin(options,A_Space,true))
+}
+7za(options*) {
+   global 7za
+   return run_cmd("""" 7za """ " StrJoin(options,A_Space,true))
 }
 run_cmd_literal(options*) {
    return run_cmd(options.RemoveAt(1) . " " . StrJoin(options,A_Space,true))
@@ -1082,7 +1086,7 @@ add_progress(progress) {
 run_cmd(code, seconds:="") {
    global secure_user_info, current, tools, extras, exitcode
    static allowed_actions
-   (!allowed_actions) ? allowed_actions := tools "\adb.exe," . tools "\fastboot.exe," . dirname(comspec) "\certutil.exe," . "java -version," . "java -jar """ tools "\apktool.jar""," . "java -jar """ tools "\sign.jar""," . tools "\zipalign.exe,"
+   (!allowed_actions) ? allowed_actions := tools "\adb.exe," . tools "\fastboot.exe," . dirname(comspec) "\certutil.exe," . "java -version," . "java -jar """ tools "\apktool.jar""," . "java -jar """ tools "\sign.jar""," . tools "\zipalign.exe," . tools "\7za.exe,"
    exitcode=
    if secure_user_info {
       Loop, parse, allowed_actions, `,
@@ -2657,6 +2661,15 @@ check_bin(force := "") {
 
       [tools\zipalign.exe]
       SHA256 e1669c0dbd337810224292d3a8e8cb87fb8074bde609b6bbb3dede83c99082ed
+
+      [tools\7za.exe]
+      SHA256 f00836a63be7ebf14e1b8c40100c59777fe3432506b330927ea1f1b7fd47ee44 #2023-06-20
+
+      [tools\7za.dll]
+      SHA256 a3fc74468477ba54517157efa5021eaa6ff72f8f5c31e53d89f07d59071c0ae7 #2023-06-20
+
+      [tools\7zxa.dll]
+      SHA256 d88fe8b26519d30dbc1c754f5efa387b1f6f4f8035b197932c1442de77de0537 #2023-06-20
 
       [extras\busybox]
       SHA256 ccdb7753cb2f065ba1ba9a83673073950fdac7a5744741d0f221b65d9fa754d3

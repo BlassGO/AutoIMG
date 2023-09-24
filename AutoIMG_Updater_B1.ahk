@@ -38,9 +38,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.2.1
+version = 1.2.2
 status = Beta
-build_date = 21.09.2023
+build_date = 24.09.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -368,15 +368,14 @@ zip(FilesToZip,sZip) {
             {
                folder := psh.Namespace(dirname(A_LoopFileLongPath))
                name := basename(A_LoopFileLongPath)
-               ; Generate an integer with the date and time of the file not including the seconds (because the addition in ZIPs may have a slight time difference)
-               file_date := RegExReplace(folder.ParseName(name).ExtendedProperty("System.DateModified"), "\D|..$")
+               file_size := folder.ParseName(name).ExtendedProperty("Size")
                write_file("`nZIP: Adding """ name """ in """ sZip """`n", general_log)
-               zip.CopyHere(A_LoopFileLongPath, 4|16 )
+               zip.CopyHere(A_LoopFileLongPath, 4|16)
                Loop {
                   for file in zip.Items()
                   {
                      if (file.Name=name) {
-                        if (file.IsFolder||RegExReplace(zip.ParseName(file.Name).ExtendedProperty("System.DateModified"), "\D|..$")=file_date)
+                        if (file.IsFolder||zip.ParseName(name).ExtendedProperty("Size")=file_size)
                            break 2
                         break
                      }
@@ -470,11 +469,11 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 					      MsgBox, 262144, Unzip preferences, % " Attempting to replace:`n`n " current "\configs.ini`n`n This action is not allowed for your security"
                           return 0
 					   }
-					   date_zip := file.ExtendedProperty("System.DateModified")
+					   file_size := file.ExtendedProperty("Size")
 					   write_file("`nUNZIP: Extracting """ relative_to_zip """ in """ dest """`n", general_log)
 					   folder.CopyHere(file, 4|16)
 					   Loop {
-						   if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("System.DateModified")==date_zip)) {
+						   if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("Size")=file_size)) {
 							  break
 						   }
 					   }
@@ -536,11 +535,11 @@ FileDeleteZip(options*) {
       try {
          if (file:=psh.Namespace(relative_path).ParseName(name)) {
             relative_to_zip := StrReplace(file.Path, path "\")
-            date_zip:=file.ExtendedProperty("System.DateModified")
+            file_size:=file.ExtendedProperty("Size")
             write_file("`nUNZIP: Deleting """ relative_to_zip """`n", general_log)
             folder.MoveHere(file, 4|16)
             Loop {
-               if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("System.DateModified")==date_zip)) {
+               if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("Size")=file_size)) {
                   break
                }
             }
@@ -588,11 +587,11 @@ FileMoveZip(file,dest,zip) {
             FileCreateDir, % dest
          relative_to_zip := StrReplace(file.Path, path "\")
          folder:=psh.Namespace(GetFullPathName(dest))
-         date_zip:=file.ExtendedProperty("System.DateModified")
+         file_size:=file.ExtendedProperty("Size")
          write_file("`nUNZIP: Moving """ relative_to_zip """ to """ dest """`n", general_log)
          folder.MoveHere(file, 4|16)
          Loop {
-            if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("System.DateModified")==date_zip)) {
+            if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("Size")=file_size)) {
                break
             }
          }
@@ -629,11 +628,11 @@ extract(file,dest,zip:="") {
                FileCreateDir, % dest
             relative_to_zip := StrReplace(file.Path, path "\")
             folder:=psh.Namespace(GetFullPathName(dest))
-            date_zip:=file.ExtendedProperty("System.DateModified")
+            file_size:=file.ExtendedProperty("Size")
             write_file("`nUNZIP: Extracting """ relative_to_zip """ in """ dest """`n", general_log)
             folder.CopyHere(file, 4|16)
             Loop {
-               if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("System.DateModified")==date_zip)) {
+               if (FileExist(dest "\" file.Name) && (file.IsFolder||folder.ParseName(file.Name).ExtendedProperty("Size")=file_size)) {
                   break
                }
             }

@@ -746,13 +746,6 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 	     script.=(is_compiled?A_LoopField:line_indent . Chr(1) . read_line) . "`n"
 		 (line=total) ? (script_section[section]:=script,script:="",section:="")
 		 continue
-	  } else if (SubStr(_startchr,1,1)=">") {
-		 to_var:={var:Trim(SubStr(read_line,2)),indent:line_indent,content:""}, orig_var:=read_line2, orig_line:=line
-		 if !(to_var.var~="^[a-zA-Z_$][a-zA-Z0-9_$]*$") {
-			unexpected:="Invalid variable name--->" . to_var.var
-			break
-		 }
-		 continue
 	  } else if (Floor(SIGNALME.code)=1) {
 	     if (SIGNALME.code=1.1||(SIGNALME.code=1&&last_label&&last_label=SIGNALME[outfd].from)||(SIGNALME.code=1.2&&last_label!=SIGNALME.main[outfd]))
 		    return SIGNALME.exit
@@ -925,7 +918,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 	  {
 		  if (_end:=InStr(read_line,"%",,_pos+1)) {
 		      _eval:=Substr(read_line,_pos+1,(_end-_pos)-1)
-		      InStr(_eval, "[&_") ? _eval:=solve_escape(_eval,_escape)
+		      InStr(_eval, "[&_") ? solve_escape(_eval,_escape)
 			  _expr:=1,_count:="",_hasexpr:=false
 			  while,(_expr:=RegexMatch(_eval,"\[``_(\d+)_``\]",_count,_expr+StrLen(_count))) {
 				 _hasexpr:=true
@@ -936,7 +929,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 					 }
 				 }
 			  }
-			  _hasexpr ? _eval:=solve_escape(_eval,_result,"``")
+			  _hasexpr ? solve_escape(_eval,_result,"``")
 			  _eval:=Eval(_eval, FD)[1]
 			  if isObject(SIGNALME.unexpected)
 				 break 2
@@ -954,8 +947,10 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 	  }
 	  if to_var.var {
 	     if (line_indent>to_var.indent) {
+			(_toresolve.MaxIndex()) ? solve_escape(read_line,_result,"``")
+			solve_escape(read_line, _escape),solve_escape(read_line, _evaluated, "~")
 			(to_var.content) ? to_var.content.="`n"
-            to_var.content.=StrReplace(Format("{:0" . (line_indent-to_var.indent)-1 . "}",""),0,A_Space) . solve_escape(solve_escape(read_line, _escape), _evaluated, "~")
+            to_var.content.=StrReplace(Format("{:0" . (line_indent-to_var.indent)-1 . "}",""),0,A_Space) . read_line
 			if (line!=total)
 		       continue
 			else
@@ -973,7 +968,14 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 		    last_line_on_var:=false
 		    continue
 		 }
-      }
+      } else if (SubStr(_startchr,1,1)=">") {
+		 to_var:={var:Trim(solve_escape(SubStr(read_line,2), _evaluated, "~")),indent:line_indent,content:""}, orig_var:=read_line2, orig_line:=line
+		 if !(to_var.var~="^[a-zA-Z_$][a-zA-Z0-9_$]*$") {
+			unexpected:="Invalid variable name--->" . to_var.var
+			break
+		 }
+		 continue
+	  }
 	  RegExMatch(read_line, "^(\S+)\s*", condition)
 	  if (condition1&&block_key:=lang(,condition1,,"condition")) {
 		 block_capture:="", block_indent:=line_indent, block_type:=condition1, block_with:=SubStr(read_line,StrLen(condition)+1), orig_block:=read_line2, orig_line:=line
@@ -989,7 +991,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 			   block_with:=0
 			}
 		 }
-		 (block_with~="\[[&``~]_\d+_[&``~]\]") ? block_with:=solve_escape(solve_escape(solve_escape(block_with, _escape), _result, "``"), _evaluated, "~")
+		 (block_with~="\[[&``~]_\d+_[&``~]\]") ? (solve_escape(block_with, _escape),solve_escape(block_with, _result, "``"),solve_escape(block_with, _evaluated, "~"))
 		 last_label:=block_type
 		 if (block_key="use") {
 			 if RegExMatch(block_with,"(\S+)",block_with) {
@@ -1032,7 +1034,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 		  if (_end:=InStr(read_line,"""",,_pos+1)) {
 			  _string:=Substr(read_line,_pos+1,(_end-_pos)-1)
 		      if (_string!="") {
-			     (_string~="\[[&``~]_\d+_[&``~]\]") ? _string:=solve_escape(solve_escape(solve_escape(_string, _escape), _result, "``"), _evaluated, "~")
+			     (_string~="\[[&``~]_\d+_[&``~]\]") ? (solve_escape(_string, _escape),solve_escape(_string, _result, "``"),solve_escape(_string, _evaluated, "~"))
 			     _stringtmp.Push(_string), _string:="", _string_rpl:="""[&_" . _stringtmp.MaxIndex() . "_&]"""
 			     read_line:=RegExReplace(read_line,".{" . (_end-_pos)+1 . "}",_string_rpl,,1,_pos), _extra:=StrLen(_string_rpl)
 			  } else {

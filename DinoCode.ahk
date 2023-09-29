@@ -732,7 +732,13 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 			_startchr:=SubStr(read_line,1,2), _endchr:=SubStr(read_line,-1)
 		}
 	  }
-	  if (SubStr(_startchr,1,1)=":") {
+	  if multi_note {
+	     (_endchr="*#") ? multi_note:=false
+		 continue
+	  } else if (SubStr(_startchr,1,1)="#") {
+	     (SubStr(_startchr,2,1)="*") ? multi_note:=true
+		 continue
+	  } else if (SubStr(_startchr,1,1)=":") {
 	     tag:=StrReplace(SubStr(read_line,2),A_Space)
 		 script ? section ? (script_section[section]:=script,script:="",section:="") : section_txt ? (GLOBAL[section_txt]:=script,script:="",section_txt:="")
 		 (_def:=InStr(tag,"->")) ? (_cdef:=SubStr(tag,_def+2),tag:=SubStr(tag,1,_def-1))
@@ -751,13 +757,6 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 		    return SIGNALME.exit
 		 else
 		    SIGNALME.code:=""
-	  }
-      if multi_note {
-	     (_endchr="*#") ? multi_note:=false
-		 continue
-	  } else if (SubStr(_startchr,1,1)="#") {
-	     (SubStr(_startchr,2,1)="*") ? multi_note:=true
-		 continue
 	  }
 	  (!(newmain||from_type="resolve")) ? (_escape:=["`a","`b","`f","`n","`r`n","`r","`t","`v"],_result:=[],_evaluated:=[]) : newmain:=false
 	  main_type:="",main_action:="",main_orig:="",_toresolve:=[]
@@ -859,7 +858,7 @@ load_config(configstr:="",local:=false,local_obj:="",from_fd:=0,from_type:="",ne
 		   unexpected:="At least one action was expected for the """ . block_type . """ block"
 		 }
          if unexpected||isObject(SIGNALME.unexpected) {
-		    last_label:=back_label,read_line2:=orig_block,line:=orig_line
+		    last_label:=back_label,(!(block_key="use"&&read_line2)) ? (read_line2:=orig_block,line:=orig_line)
 			break
 	     } else {
 			if (block_key="for") {

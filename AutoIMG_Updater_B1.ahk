@@ -38,9 +38,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.2.2
+version = 1.2.3
 status = Beta
-build_date = 24.09.2023
+build_date = 28.09.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO

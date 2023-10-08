@@ -1,4 +1,4 @@
-#NoEnv
+﻿#NoEnv
 #SingleInstance Ignore
 SendMode Input  ; Recommended for new scripts due to its superior speed and reliability.
 SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
@@ -13,6 +13,8 @@ SetBatchLines -1
 #include http.ahk
 #include header_color.ahk
 #include edit_color.ahk
+#include obj_dump.ahk
+#include crypt.ahk
 
 ; AHK2 configs
 ;@Ahk2Exe-SetName         AutoIMG
@@ -38,9 +40,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.2.3
+version = 1.3.0
 status = Beta
-build_date = 28.09.2023
+build_date = 08.10.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -67,14 +69,15 @@ zipalign := tools "\zipalign.exe"
 7za := tools "\7za.exe"
 busybox := extras "\busybox"
 dummy_img := extras "\dummy.img"
+app_manager := extras "\app_manager"
 
 ; Global Regex
 ip_check := "((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))\s*$)|(^\s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?\s*$))"
 
 ; Check dependencies
 Folders := current "," current "\images," tools "," extras
-Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," 7za "," sign "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
-Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png,"
+Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," 7za "," sign "," app_manager "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
+Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png,"
 Loop, parse, Folders, `,
 {
    If A_LoopField && !InStr(FileExist(A_LoopField), "D") {
@@ -296,6 +299,16 @@ isBinFile(Filename,NumBytes:=32,Minimum:=4,complexunicode:=1) {
 	
 	return 0
 }
+JEE_StrUtf8BytesToText(ByRef vUtf8Bytes) {
+	if A_IsUnicode
+	{
+		VarSetCapacity(vTemp, StrPut(vUtf8Bytes, "CP0"))
+		StrPut(vUtf8Bytes, &vTemp, "CP0")
+		return StrGet(&vTemp, "UTF-8")
+	}
+	else
+		return StrGet(&vUtf8Bytes, "UTF-8")
+}
 eventHandler(wParam, lParam, msg, hwnd) {
 	static WM_LBUTTONDOWN := 0x201
 	, WM_LBUTTONUP := 0x202
@@ -304,14 +317,20 @@ eventHandler(wParam, lParam, msg, hwnd) {
 	, lButtonDownTick := 0
 	global clicktime := 0
 	global generalbox
-
 	if (msg = WM_LBUTTONDOWN) {
 		lButtonDownTick := A_TickCount
 	} else if (msg = WM_LBUTTONUP) {
 		clicktime := A_TickCount - lButtonDownTick
 	} else if (hwnd = generalbox) && (msg = WM_LBUTTONDBLCLK) {
 	    gosub console
-	}
+	} else if (wParam = 1027) {
+      Process, Exist 
+      DetectHiddenWindows, On 
+      if WinExist("Request ahk_class #32770 ahk_pid " . ErrorLevel) { 
+         ControlSetText, Button1, &Select_FILE 
+         ControlSetText, Button2, &Abort
+      } 
+   }
 	return 
 }
 CountMatch(str, match) {
@@ -388,7 +407,7 @@ zip(FilesToZip,sZip) {
          }
       }
    } catch e {
-	   MsgBox, 262144, Zip, % "A fatal error occurred:`n`n" e.message "`n`n--> " e.what
+	   MsgBox, % 262144 + 16, Zip, % "A fatal error occurred:`n`n" e.message "`n`n--> " e.what
       return 0
 	}
    return 1
@@ -483,7 +502,7 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 		}
 	} catch e {
       InStr(e.what, "RegexMatch") ? e.message:="Check your Regex Pattern"
-	   MsgBox, 262144, Unzip, % "A fatal error occurred while extracting:`n""" zip_in_use """`n`n" e.message "`n`n--> " e.what
+	   MsgBox, % 262144 + 16, Unzip, % "A fatal error occurred while extracting:`n""" zip_in_use """`n`n" e.message "`n`n--> " e.what
       return 0
 	}
    (!resolve) ? (zip_in_use:="", last_path:="")
@@ -980,7 +999,7 @@ FileCreateDir(options*) {
 FileDelete(options*) {
    global HERE, TOOL, secure_user_info, general_log
    for key,dir in options {
-      dir := GetFullPathName(dir), (A_Index=1) ? result:=1
+      dir := GetFullPathName(dir)
       if (secure_user_info && !(dir ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
          MsgBox, 262148, Removal preferences, % " Attempting to delete a file outside of common paths:`n`n " dir "`n`n Do you want to allow it?"
          IfMsgBox No
@@ -993,10 +1012,8 @@ FileDelete(options*) {
          FileDelete, % dir
       else if InStr(_type, "D")
          FileRemoveDir, % dir, 1
-      else
-         result:=0
    }
-   return result
+   return 1
 }
 FileMove(orig,dir) {
    global HERE, TOOL, secure_user_info, general_log
@@ -1085,7 +1102,7 @@ add_progress(progress) {
 run_cmd(code, seconds:="") {
    global secure_user_info, current, tools, extras, exitcode
    static allowed_actions
-   (!allowed_actions) ? allowed_actions := tools "\adb.exe," . tools "\fastboot.exe," . dirname(comspec) "\certutil.exe," . "java -version," . "java -jar """ tools "\apktool.jar""," . "java -jar """ tools "\sign.jar""," . tools "\zipalign.exe," . tools "\7za.exe,"
+   (!allowed_actions) ? allowed_actions := tools "\adb.exe," . tools "\fastboot.exe," . "java -version," . "java -jar """ tools "\apktool.jar""," . "java -jar """ tools "\sign.jar""," . tools "\zipalign.exe," . tools "\7za.exe,"
    exitcode=
    if secure_user_info {
       Loop, parse, allowed_actions, `,
@@ -1129,12 +1146,11 @@ run_cmd(code, seconds:="") {
    Process, Exist, % cmdpid
    if ErrorLevel {
       DllCall("FreeConsole")
-      exec.Terminate()
-	  RunWait, taskkill /F /PID %cmdpid%,, Hide
+      exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
       Process, Close, % cmdpid
    }
    DetectHiddenWindows, % back
-   return result
+   return JEE_StrUtf8BytesToText(result)
    cmd_output:
    if (exitcode=="") {
 	   if (exec.Status==1) {
@@ -1142,10 +1158,8 @@ run_cmd(code, seconds:="") {
 	   } else {
 	      result := 0
 	   }
-	   DllCall("FreeConsole")
-       exec.Terminate()
-	   RunWait, taskkill /F /PID %cmdpid%,, Hide
-       Process, Close, % cmdpid
+	   exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
+      Process, Close, % cmdpid
    }
    return
 }
@@ -1421,6 +1435,7 @@ check_free_space(img, part) {
    FileGetSize, dummy_size, %dummy_img%
    needed := img_size - part_size
    back := needed
+   Gui 2: Destroy 
    Gui 2: Default 
    Gui 2: +AlwaysOnTop
    Gui 2: margin, %mx%, %my%
@@ -1496,7 +1511,7 @@ check_free_space(img, part) {
       }
 	  Gui 2: Destroy
    } else {
-      MsgBox, 262144, HELP, There is not enough space yet!
+      MsgBox, % 262144 + 64, HELP, There is not enough space yet!
    }
    return
    2GuiSize:
@@ -1617,7 +1632,7 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
 				  result .= adb("start-server")
 				  if !InStr(result, "daemon started successfully") {
 				    write_file("`nADB: Could not start the server`n[`n" result "`n]`n", general_log)
-					 MsgBox, 262144, HELP, Could not start ADB server`n`nCannot continue...
+					 MsgBox, % 262144 + 16, HELP, Could not start ADB server`n`nCannot continue...
 					 return 0
 				  }
 			  }
@@ -1629,14 +1644,14 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
 					  } else if (wireless_IP ~= ip_check) {
 					     ip := "[" wireless_IP "]"
 					  } else {
-					     MsgBox, 262144, HELP, % "Invalid IP: """ wireless_IP """"
+					     MsgBox, % 262144 + 16, HELP, % "Invalid IP: """ wireless_IP """"
 						 break
 					  }
 					  if !port {
 						if (wireless_PORT ~= "^\d+$") {
 						   port := wireless_PORT
 						} else if wireless_PORT {
-						   MsgBox, 262144, HELP, % "Invalid PORT: """ wireless_PORT """"
+						   MsgBox, % 262144 + 16, HELP, % "Invalid PORT: """ wireless_PORT """"
 						   break
 						}
 					  }
@@ -1702,6 +1717,7 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
            }
 		   if ((show_panel&&devices.MaxIndex())||(!currentdevice&&devices.MaxIndex()>1)) {
 		       timed_msg_destroy()
+             Gui new4: Destroy 
 		       Gui new4: Default 
 		       Gui new4: -MinimizeBox +AlwaysOnTop
 			   Gui new4: margin, %mx%, %my%
@@ -1784,9 +1800,9 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
 		  }
 		  if show_msg {
 			  if wireless_IP {
-		         MsgBox, 262144, HELP, % "HUH Can't connect TCP/IP: `n`nIP[" ip "] : PORT[" port "]"
+		         MsgBox, % 262144 + 64, HELP, % "HUH Can't connect TCP/IP: `n`nIP[" ip "] : PORT[" port "]"
 			  } else {
-			     MsgBox, 262144, HELP, HUH Can't detect your device
+			     MsgBox, % 262144 + 64, HELP, HUH Can't detect your device
 			  }
 		  }
 		  break
@@ -1806,7 +1822,7 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
    }
    new4GuiClose:
    if !show_panel&&!currentdevice {
-      MsgBox, 262144, HELP, % "Double click the device you want"
+      MsgBox, % 262144 + 64, HELP, % "Double click the device you want"
    } else {
 	  Gui new4: Destroy
    }
@@ -1827,7 +1843,7 @@ delete_partition(part) {
    if (serial && !check_active(serial))
       return 0
    if !fastbootd {
-      MsgBox, 262144, HELP, You cant delete partitions from normal fastboot, only fastbootD
+      MsgBox, % 262144 + 64, HELP, You cant delete partitions from normal fastboot, only fastbootD
 	  return 0
    }
    part := with_slot(part)
@@ -1840,12 +1856,12 @@ delete_partition(part) {
       result := fastboot("delete-logical-partition " part " -s " serial)
    } else {
       print(">> No dynamic part: " part)
-	  MsgBox, 262144, HELP, You can only delete Dynamic Partitions
+	  MsgBox, % 262144 + 64, HELP, You can only delete Dynamic Partitions
 	  return 0
    }
    if (result ~= "i)\berror|failed\b") {
       write_file(result, general_log)
-      MsgBox, 262144, ERROR, % result
+      MsgBox, % 262144 + 16, ERROR, % result
 	  return 0
    }
    return 1
@@ -1859,12 +1875,12 @@ create_partition(part, size) {
    if (serial && !check_active(serial))
       return 0
    if !fastbootd {
-      MsgBox, 262144, HELP, You cant create partitions from normal fastboot, only fastbootD
+      MsgBox, % 262144 + 64, HELP, You cant create partitions from normal fastboot, only fastbootD
 	  return 0
    }
    if !super {
       print(">> No dynamic device")
-	  MsgBox, 262144, HELP, You can only create partitions on devices with Dynamic Partitions
+	  MsgBox, % 262144 + 64, HELP, You can only create partitions on devices with Dynamic Partitions
 	  return 0
    }
    if !size
@@ -1873,7 +1889,7 @@ create_partition(part, size) {
    result := fastboot("create-logical-partition " part " " size " -s " serial)
    if (result ~= "i)\berror|failed\b") {
       write_file(result, general_log)
-      MsgBox, 262144, ERROR, % result
+      MsgBox, % 262144 + 16, ERROR, % result
 	  return 0
    }
    return 1
@@ -1901,8 +1917,218 @@ to_bytes(size) {
       return
    }
 }
-install_manager() {
-   global mx, my, style, installcontrol, install_files, all_formats, current, HeaderColors, formats
+app_manager(list:="") {
+   global mx, my, style, appcontrol, HeaderColors, serial, currentdevice, app_manager, general_log, current, appcontrol_icons, to_find, default_mode_app, default_mode_app_type
+   StringCaseSense, Off
+   if serial && !check_active(serial)
+      return 0
+   Print(">> Manager: " . currentdevice.name)
+   if !push(app_manager,"/data/local/tmp")
+      return 0
+   if list&&InStr(FileExist(list), "A") {
+      Print(">> Manager: Loading list...")
+      if (SubStr(ObjHeader(list),0)="A") {
+         state:=ObjLoad(list)
+      } else {
+         MsgBox, % 262144 + 16, App Manager, Invalid file format`n`n-> %list%
+         return 0
+      }
+   } else {
+      state:={}
+   }
+   Print(">> Manager: Loading apps...")
+   app:={}
+   Loop, parse, % adb_shell("export CLASSPATH=/data/local/tmp/app_manager; (app_process / Main) 2>/dev/null"), `n,`r
+      (!user&&SubStr(A_LoopField,1,5)="USER:") ? (user:=SubStr(A_LoopField,6)) : ((info:=StrSplit(StrReplace(A_LoopField, Chr(0xA0), A_Space), ":")) ? (info.MaxIndex()=6) ? app[info.4]:={state:(info.1="ENABLED")?1:((info.1="DISABLED")?0:-1), is_system:(info.2="SYSTEM")?1:0, uid:info.3, path:info.5, name:info.6})
+   if !(total_apps:=app.Count()) {
+      MsgBox, % 262144 + 64, HUH, Could not get information from any app
+      return 0
+   }
+   Print(">> Manager: Loading opts...")
+   smanager:=adb_shell("pm help")
+   install_existing:=InStr(smanager,"install-existing")?true:false
+   if (user="null") {
+      Print(">> Manager: Success")
+      user:=""
+   } else {
+      Print(">> Manager: Success in User-" . user)
+      user:=InStr(smanager,"--user")?"--user " . user . " ":""
+   }
+   smanager:=""
+   IniRead, app_msg, % current "\configs.ini", GENERAL, app_msg, 0
+   (app_msg=0) ? help(current "\images\app_guide.png", "Please note that UNMARKED apps will be uninstalled.")
+   IniWrite, 1, % current "\configs.ini", GENERAL, app_msg
+   Gui app: Destroy 
+   Gui app: Default 
+   Gui app: +AlwaysOnTop
+   Gui app: margin, %mx%, %my%
+   Gui app: Font, s10, %style%
+   Gui app: Add, Edit, w320 vto_find gappcontrol_find Section,
+   Gui app: Add, DropDownList, AltSubmit center X+0 YP w100 vdefault_mode_app gappcontrol_find, All apps|Enabled|Disabled|Uninstalled
+   Gui app: Add, DropDownList, AltSubmit center X+0 YP w100 vdefault_mode_app_type gappcontrol_find, System-User|System|User
+   Gui app: Add, ListView, AltSubmit -ReadOnly hwndappmanager NoSortHdr -LV0x10 LV0x20 Checked gappcontrol vappcontrol XS Y+0 w520 h200, |Name|Package|Path
+   Gui app: Add, Text, XS+30 Y+10 Section, The changes will not be applied unless you click
+   Gui app: Add, Text, XP Y+15, You can export your current selection
+   Gui app: Add, Text, XP Y+20, You can switch between Icon Mode
+   Gui app: Font, s10, Arial Black
+   Gui app: Add, Text, X+90 YS c254EC5, -►
+   Gui app: Add, Text, XP Y+15 c254EC5, -►
+   Gui app: Add, Text, XP Y+20 c254EC5, -►
+   Gui app: Font, s10, %style%
+   Gui app: Add, Button, center X+30 YS-5 h30 w100 gappcontrol_do, APPLY
+   Gui app: Add, Button, center XP Y+5 h30 w100 gappcontrol_export, EXPORT
+   Gui app: Add, Button, center XP Y+5 h30 w100 gappcontrol_icons vappcontrol_icons, LOAD ICONS
+   GuiControl, app:Choose, default_mode_app, 1
+   GuiControl, app:Choose, default_mode_app_type, 1
+   gosub appcontrol_find
+   HHDR := DllCall("SendMessage", "Ptr", appmanager, "UInt", 0x101F, "Ptr", 0, "Ptr", 0, "UPtr") ; LVM_GETHEADER
+   HeaderColors[HHDR] := {Txt: 0xFFFFFF, Bkg: 0x797e7f} ; BGR
+   SubClassControl(appmanager, "HeaderCustomDraw")
+   Gui app: show, AutoSize Center, App Manager
+   WinSet, Redraw, , ahk_id %HHDR%
+   WinWaitClose, App Manager
+   Gui app: Destroy
+   return
+   appcontrol:
+   If (A_GuiEvent == "I") {
+      If ((ErrorLevel == "C") || (ErrorLevel == "c")) && LV_GetText(pkg, A_EventInfo, 3) {
+         state[pkg]:=(ErrorLevel == "C") ? 1 : 0
+      }
+   }
+   If (A_GuiEvent == "DoubleClick" && LV_GetText(copy, A_EventInfo,LV_SubItemHitTest(appmanager))) {
+      ToolTip, % "Copied " . copy
+	   Clipboard := "", Clipboard := copy
+	   SetTimer, RemoveToolTip, -1000
+   }
+   return
+   appcontrol_icons:
+   if icons_mode {
+      GuiControl, app:, appcontrol_icons, LOAD ICONS
+      icons_mode:=false
+   } else {
+      GuiControl, app:, appcontrol_icons, GO BACK
+      icons_mode:=true
+   }
+   if icons_mode&&!loaded_icons {
+      Gui app: Default 
+      LV_Delete()
+      LV_Add("", "", "Loading icons...")
+      LV_Add("", "", "This process can take a long time.")
+      LV_ModifyCol(2, "AutoHdr"), FileCreateDir(dest:=current . "\tmp")
+      write_file(adb_shell("export CLASSPATH=/data/local/tmp/app_manager; (app_process / Main -icon /data/local/tmp/app_manager_icons) 2>/dev/null"),general_log)
+      write_file(adb("pull /data/local/tmp/app_manager_icons """ . dest . """"),general_log)
+      dest.="\app_manager_icons"
+      for pkg, props in app
+      {
+          app[pkg].icon:=(InStr(FileExist(out:=dest . "\" . pkg . ".png"), "A")) ? out : current . "\images\app.png"
+      }
+   }
+   loaded_icons:=true
+   gosub appcontrol_find
+   return
+   appcontrol_do:
+   Gui app: Destroy
+   smanager:={}
+   for pkg, with_state in state
+   {
+      if app.HasKey(pkg) {
+         if with_state {
+            switch (app[pkg].state)
+            {
+               case 0:
+                  smanager.Push("pm enable " . user . pkg)
+               case -1:
+                  smanager.Push(((install_existing) ? "pm install-existing " . user . pkg : "pm install -r " . user . """" app[pkg].path """"))
+            }
+         } else if (app[pkg].state>0) {
+            smanager.Push("pm uninstall " . user . pkg)
+         }
+      }
+   }
+   at_pos:=0,error:=0
+   Print(">> Manager: Running...")
+   Loop, parse, % adb_shell(StrJoin(smanager,";")), `n,`r
+   {
+      if (A_LoopField) {
+         at_pos++
+         if (A_LoopField~="i)Failure|error") {
+            if !error
+               MsgBox, % 262144 + 16, HUH, % smanager[at_pos] . "`n`nThis command ended in ERROR! Check the log"
+            error++
+         }
+         write_file("`n(" . smanager[at_pos] . ") -> " A_LoopField . "`n",general_log)
+      }
+   }
+   Print(">> Manager: " . (at_pos-error) " changes were made" . ((error)?", " . error . " errors":""))
+   smanager:=""
+   return
+   appcontrol_export:
+   Gui app: -AlwaysOnTop
+   start_date:=A_Now
+   FormatTime, start_date,, dd_M_yyyy-hh_mm_ss
+   FileSelectFile, export, S, % "AppList_(" . start_date .  ").aid", Define where to save the file, AutoIMGData (*.aid)
+   if export&&!ObjDump(export,state,,"A") {
+      MsgBox, % 262144 + 16, HUH, Could NOT export data!
+   }
+   Gui app: +AlwaysOnTop
+   return
+   appcontrol_find:
+   GuiControl, app:-g, appcontrol
+   Gui app: Default 
+   LV_Delete()
+   Sleep 250
+   GuiControl, app: -g, to_find
+   Gui app: Submit, NoHide
+   at_pos:=0
+   if icons_mode {
+      LV_SetImageList(IconList:=IL_Create(total_apps,,true))
+      GuiControl, app:+Icon, appcontrol
+   } else {
+      GuiControl, app:+Report, appcontrol
+   }
+   for pkg, props in app
+   {
+      switch (default_mode_app_type)
+      {
+         case 1:
+            skip:=false
+         case 2:
+            (props.is_system) ? skip:=false : skip:=true
+         case 3:
+            (!props.is_system) ? skip:=false : skip:=true 
+      }
+      if !skip {
+         with_state:=(state[pkg]!="") ? state[pkg] : props.state
+         switch (default_mode_app)
+         {
+            case 1:
+               skip:=false
+            case 2:
+               (with_state=1) ? skip:=false : skip:=true
+            case 3:
+               (with_state=0) ? skip:=false : skip:=true
+            case 4:
+               (props.state=-1) ? skip:=false : skip:=true
+         }
+         if (!skip)&&(InStr(props.name, to_find)||InStr(pkg, to_find)) {
+            at_pos++
+            (icons_mode) ? LV_Add("Icon" . IL_Add(IconList, props.icon, 0xFFFFFF, true), props.name, "", pkg) : LV_Add("", "", props.name, pkg, props.path)
+            (with_state>0) ? LV_Modify(at_pos, "Check")
+         }
+      }
+   }
+   LV_ModifyCol(1, "Center")
+   if !icons_mode {
+      Loop % LV_GetCount("Column")
+         LV_ModifyCol(A_Index, "AutoHdr")
+   }
+   WinSet, Redraw, , ahk_id %HHDR%
+   GuiControl, app:+gappcontrol, appcontrol
+   GuiControl, app:+gappcontrol_find, to_find
+   Return
+}
+install_manager(data:="") {
+   global mx, my, style, installcontrol, install_files, all_formats, current, HeaderColors, formats, unexpected
    Gui, 1:Submit, NoHide
    GuiControlGet, part, 1:, partition
    IniRead, zip_msg, % current "\configs.ini", GENERAL, zip_msg, 0
@@ -1923,15 +2149,44 @@ install_manager() {
       }
    }
    (!ext) ? ext := "*.img;*.zip;*.apk;*.cpio"
+   if data&&InStr(FileExist(data), "A") {
+      Print(">> Manager: Loading list...")
+      if (SubStr(ObjHeader(data),0)="I") {
+         install_files:=ObjLoad(data)
+         Print(">> Manager: Success")
+      } else {
+         MsgBox, % 262144 + 16, Installation Manager, Invalid file format`n`n-> %data%
+         return 0
+      }
+   } else {
+      data:=""
+   }
+   Gui 3: Destroy
    Gui 3: Default 
    Gui 3: +AlwaysOnTop
    Gui 3: margin, %mx%, %my%
    Gui 3: Font, s10, %style%
-   Gui 3: Add, ListView, AltSubmit -ReadOnly hwndmanager NoSortHdr -LV0x10 LV0x20 Checked ginstallcontrol vinstallcontrol Y+0 w320 h200, |Partition|File to install
+   Gui 3: Add, ListView, AltSubmit -ReadOnly hwndmanager NoSortHdr -LV0x10 LV0x20 Checked vinstallcontrol Y+0 w320 h200, |Partition|File to install
+   Gui 3: Add, Button, Center Y+0 w320 ginstallcontrol_export, EXPORT
    LV_Delete()
    list := New LV_InCellEdit(manager)
    list.SetColumns(2)
    for index, file in install_files {
+      if data && !InStr(FileExist(file.file), "A") {
+         MsgBox, % 262144 + 48 + 1, Request, % file.file "`n`nThis file is intended for the partition """ file.part """ but it DOES NOT EXIST!"
+         ifMsgBox OK
+         {
+            FileSelectFile, getfile, 1,, Please select some IMG to Install, (%ext%)
+            (getfile) ? (install_files[index].file:=file.file:=getfile)
+         } else {
+            getfile:=""
+         }
+         if !getfile {
+            print(">> Loaded list removed!")
+            install_files:={}
+            return 0
+         }
+      }
       LV_Add("", "", file.part, file.file)
       (file.install) ? LV_Modify(index, "Check")
    }
@@ -1943,10 +2198,12 @@ install_manager() {
    SubClassControl(manager, "HeaderCustomDraw")
    Gui 3: show, AutoSize Center, Installation Manager
    WinSet, Redraw, , ahk_id %HHDR%
+   GuiControl, 3:+ginstallcontrol, installcontrol
    WinWaitClose, Installation Manager
    Gui 3: Destroy
    installcontrol:
    If (list["Changed"]) {
+       Gui 3: Default 
        Row =
 		 Column =
 		 New =
@@ -1961,7 +2218,7 @@ install_manager() {
           list.Remove("Changed")
 		    LV_ModifyCol(2, "AutoHdr")
        } else {
-		    MsgBox, 262144, HELP, You cant put an empty partition
+		    MsgBox, % 262144 + 64, HELP, You cant put an empty partition
 			 list.Remove("Changed")
 			 LV_Modify(Row, "Col2", install_files[Row].part)
 			 return
@@ -1977,6 +2234,7 @@ install_manager() {
    If (A_GuiEvent == "DoubleClick" && install_files.HasKey(A_EventInfo)) {
      Column := LV_SubItemHitTest(manager)
 	  If (Column=3) {
+         Gui 3: Default 
 	      Gui 3: -AlwaysOnTop
          FileSelectFile, file, 1,, Please select some IMG to Install, (%ext%)
          if file {
@@ -1992,7 +2250,7 @@ install_manager() {
                if (install_files.MaxIndex()=A_EventInfo)
                   GuiControl, 1:, partition, ZIP FILE
                if (zip_msg!=1) {
-                  MsgBox, 262144, HELP, The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order
+                  help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
                   IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
                }
             } else if (ext_file="cpio") {
@@ -2007,6 +2265,17 @@ install_manager() {
 		  Gui 3: +AlwaysOnTop
 	  }
    }
+   return
+   installcontrol_export:
+   gosub installcontrol
+   Gui 3: -AlwaysOnTop
+   start_date:=A_Now
+   FormatTime, start_date,, dd_M_yyyy-hh_mm_ss
+   FileSelectFile, export, S, % "Installation_(" . start_date .  ").aid", Define where to save the file, AutoIMGData (*.aid)
+   if export&&!ObjDump(export,install_files,,"I") {
+      MsgBox, 262144, HUH, Could NOT export data!
+   }
+   Gui 3: +AlwaysOnTop
    return
 }
 xiaomeme_test(img) {
@@ -2109,7 +2378,7 @@ install_img(img, part, extra := "", extra2 := "") {
       return 0
    } else if (result ~= "i)\berror|failed\b") {
       write_file(result, general_log)
-      MsgBox, 262144, ERROR, % result
+      MsgBox, % 262144 + 16, ERROR, % result
 	  return 0
    }
    return 1
@@ -2140,7 +2409,7 @@ ensure_fastboot() {
    } else {
       write_file(result, general_log)
       print(">> Oops! Cant reboot in fastboot")
-	   MsgBox, 262144, ERROR, Cant reboot in fastboot
+	   MsgBox, % 262144 + 16, ERROR, Cant reboot in fastboot
       return 0
    }
 }
@@ -2210,7 +2479,7 @@ update_drivers() {
      if (exitcode<=0)||(result ~= "i)\berror|failed\b") {
 	    write_file("`nDriver installation ended with:" exitcode " `n", general_log)
 	    print(">> Cant install drivers!")
-		MsgBox, 262144, ERROR, The drivers were not installed correctly
+		MsgBox, % 262144 + 16, ERROR, The drivers were not installed correctly
 	 } else {
 	    IniWrite, 1, % current "\configs.ini", GENERAL, drivers
 	    print(">> Updated drivers")
@@ -2244,7 +2513,7 @@ format_data() {
    }
    if (result ~= "i)\berror|failed\b") {
       write_file(result, general_log)
-      MsgBox, 262144, ERROR, % "A problem formatting the device storage!"
+      MsgBox, % 262144 + 16, ERROR, % "A problem formatting the device storage!"
 	  return 0
    }
    return 1
@@ -2256,7 +2525,7 @@ push(file, dest) {
    if !exist_device
       return 0
    if !FileExist(file) {
-      MsgBox, 262144, ERROR, % "Cant find " file
+      MsgBox, % 262144 + 16, ERROR, % "Cant find " file
       return 0
    }
    if (device_mode="fastboot") {
@@ -2275,7 +2544,7 @@ push(file, dest) {
    result .= adb_shell("[ ! -f " """" dest "/" basename(file) """" " ] && echo " """" "ERROR: Cant find " basename(file) """")
    if (result ~= "i)\berror|failed\b") {
       write_file(result, general_log)
-      MsgBox, 262144, ERROR, % "Unable to load " basename(file) " on the device"
+      MsgBox, % 262144 + 16, ERROR, % "Unable to load " basename(file) " on the device"
 	  return 0
    }
    return 1
@@ -2292,7 +2561,7 @@ pull(file, dest) {
       ensure_shell()
    }
    if !exist_file(file) {
-      MsgBox, 262144, ERROR, % "Cant find " file " on the device"
+      MsgBox, % 262144 + 16, ERROR, % "Cant find " file " on the device"
       return 0
    }
    FileCreateDir(dest)
@@ -2305,7 +2574,7 @@ pull(file, dest) {
    result .= adb_serial("pull " """" file """" " " """" dest """")
    if (result ~= "i)\berror|failed\b") || !FileExist(dest "\" basename(file)) {
       write_file(result, general_log)
-      MsgBox, 262144, ERROR, % "Unable to get " basename(file)
+      MsgBox, % 262144 + 16, ERROR, % "Unable to get " basename(file)
 	  return 0
    }
    return 1
@@ -2345,7 +2614,7 @@ setup_busybox(to_dir, dest := "") {
    if (result ~= "i)\berror|failed\b") {
       busybox_work:=""
       write_file(result, general_log)
-	   MsgBox, 262144, ERROR, % "Cant setup " basename(busybox)
+	   MsgBox, % 262144 + 16, ERROR, % "Cant setup " basename(busybox)
 	   return 0
    }
    print(">> Busybox: Success")
@@ -2412,14 +2681,14 @@ create_dir(dir) {
 copy(any, to) {
    global general_log
    if !exist_file(any) {
-	   MsgBox, 262144, ERROR, % "Cant find " any " on the device"
+	   MsgBox, % 262144 + 16, ERROR, % "Cant find " any " on the device"
        return 0
    }
    result .= adb_shell("cp -rf " """" any """" " " """" to """" " && echo Success")
    if InStr(result, "Success") {
       return 1
    } else {
-      MsgBox, 262144, ERROR, % "Cant copy " any " in " to
+      MsgBox, % 262144 + 16, ERROR, % "Cant copy " any " in " to
       write_file(result, general_log)
       return 0
    }
@@ -2429,7 +2698,7 @@ run_binary(binary, action := ""){
 	if (serial && !check_active(serial))
       return 0
 	if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The run_binary function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The run_binary function is not supported from fastboot
 	   return 0
 	}
    if !IsObject(cache)
@@ -2438,7 +2707,7 @@ run_binary(binary, action := ""){
       write_file("`n" Format("{:U}",at) " command support`n", general_log)
 	} else {
       if action
-	      MsgBox, 262144, ERROR, % binary " command is not supported by device"
+	      MsgBox, % 262144 + 16, ERROR, % binary " command is not supported by device"
       return 0
 	}
    return (action) ? adb_shell("""" at """ " action) : at
@@ -2489,7 +2758,7 @@ ensure_tmp(needexec := ""){
       TMP:=Trim(SubStr(TMP, _at+2), "`n`r" A_Space "`t")
    } else {
       TMP:=""
-		MsgBox, 262144, ERROR, Cannot create a temp directory on the device
+		MsgBox, % 262144 + 16, ERROR, Cannot create a temp directory on the device
    }
    write_file(result, general_log)
    return TMP
@@ -2508,7 +2777,7 @@ flash_zip(zip) {
    if !(TMP:=ensure_tmp(true))
       return 0
    if !exist_file(zip) {
-      MsgBox, 262144, ERROR, % "Cant find """ zip """ on the device"
+      MsgBox, % 262144 + 16, ERROR, % "Cant find """ zip """ on the device"
       return 0
    }
    run_binary("twrp") && twrp := true
@@ -2540,7 +2809,7 @@ flash_zip(zip) {
 	   result .= "------------------------------------------`n"
       if (result ~= "i)\berror:\b") {
 	     write_file(result, general_log)
-	     MsgBox, 262144, ERROR, % "Cant execute " ubasename(zip)
+	     MsgBox, % 262144 + 16, ERROR, % "Cant execute " ubasename(zip)
 	     return 0
 	   }
    }
@@ -2606,27 +2875,27 @@ web_config(url, time:=false, hide:="") {
 }
 get_hash(file, type){
    global general_log
-   if (type ~= "\bMD2|MD4|MD5\b") {
-		checklen = 32
+   if (type = "MD5") {
+		HashAlg:=1
+   } else if (type = "MD2") {
+		HashAlg:=2
    } else if (type = "SHA1") {
-		checklen = 40
+		HashAlg:=3
    } else if (type = "SHA256") {
-		checklen = 64
+		HashAlg:=4
    } else if (type = "SHA384") {
-		checklen = 96
+		HashAlg:=5
    } else if (type = "SHA512") {
-		checklen = 128
+		HashAlg:=6
    } else {
 	  write_file("`nUnsupported hash type: " type "`n", general_log)
 	  return
    }
-   try := run_cmd("""" dirname(comspec) "\certutil.exe"" -hashfile """ file """ " type)
-   RegExMatch(try, "\b[A-Fa-f0-9]{" checklen "}\b", hash)
-   if !hash {
+   if !(hash := Crypt.Hash.FileHash(file,HashAlg,pwd:="",hmac_alg:=1)) {
       write_file("`nCant get hash of: " file "`n", general_log)
-	  return
+   } else {
+      return hash
    }
-   return hash
 }
 check_bin(force := "") {
    global current
@@ -2672,7 +2941,10 @@ check_bin(force := "") {
 
       [extras\busybox]
       SHA256 ccdb7753cb2f065ba1ba9a83673073950fdac7a5744741d0f221b65d9fa754d3
-	  
+
+      [extras\app_manager]
+      SHA256 6e3d83b6d78e3edb1ff36a753b86ce434ce495890b4b00e49507cce15fe0a501
+
 	  )
    }
    if force
@@ -2698,8 +2970,7 @@ check_bin(force := "") {
 					hashtype=
 					checklen=
 					hash=
-					if (A_LoopField ~= "\bMD2|MD4|MD5\b") {
-						RegExMatch(A_LoopField, "\bMD2|MD4|MD5\b", hashtype)
+					if RegExMatch(A_LoopField, "\bMD2|MD5\b", hashtype) {
 						checklen = 32
 					} else if (A_LoopField ~= "\bSHA1\b") {
 						hashtype = SHA1
@@ -2783,8 +3054,7 @@ download(url, to, option:="") {
 	     return 0
 	  }
    }
-   if (option ~= "\bMD2|MD4|MD5\b") {
-        RegExMatch(option, "\bMD2|MD4|MD5\b", hashtype)
+   if RegExMatch(option, "\bMD2|MD5\b", hashtype) {
 		checklen = 32
    } else if (option ~= "\bSHA1\b") {
         hashtype = SHA1
@@ -2828,7 +3098,7 @@ download(url, to, option:="") {
          RegExMatch(option, "\b[A-Fa-f0-9]{" checklen "}\b", hash)
 	  }
 	  if !hash {
-	     MsgBox, 262144, ERROR, % "No valid hash found for: " hashtype
+	     MsgBox, % 262144 + 16, ERROR, % "No valid hash found for: " hashtype
 		 return 0
 	  }
    }
@@ -2839,7 +3109,7 @@ download(url, to, option:="") {
       if bytes is not integer
       {
          write_file("`n" wbasename(to) " download ended with: " bytes "`n", general_log)
-         MsgBox, 262144, ERROR, % "Oops! no response from download server, try again later"
+         MsgBox, % 262144 + 16, ERROR, % "Oops! no response from download server, try again later"
          return 0
       }
    }
@@ -2871,14 +3141,14 @@ download(url, to, option:="") {
    result := ErrorLevel
    SetTimer, progress, Off
    if result {
-      MsgBox, 262144, ERROR, % " Unable to download content: `n " url
+      MsgBox, % 262144 + 16, ERROR, % " Unable to download content: `n " url
 	  result:=0
    } else {
       FileGetSize, currentbytes, % to
       if (bytes!=currentbytes) {
 		 write_file("`n" basename(to) " has " currentbytes " of " bytes ", removing...`n", general_log)
 		 FileDelete, % to
-		 MsgBox, 262144, ERROR, % """" wbasename(to) """ is corrupted (and was removed), please try again later "
+		 MsgBox, % 262144 + 16, ERROR, % """" wbasename(to) """ is corrupted (and was removed), please try again later "
 		 result:=0
 	  } else if hash {
 	     if (hash=get_hash(to,hashtype)) {
@@ -2887,7 +3157,7 @@ download(url, to, option:="") {
 		 } else {
 			write_file("`n" basename(to) " DID NOT pass " hashtype " hash check, removing...`n", general_log)
 			FileDelete, % to
-			MsgBox, 262144, ERROR, % """" wbasename(to) """ did not pass the specified " hashtype " check and was removed"
+			MsgBox, % 262144 + 16, ERROR, % """" wbasename(to) """ did not pass the specified " hashtype " check and was removed"
 			result:=0
 	     }
       } else {
@@ -2917,7 +3187,7 @@ download(url, to, option:="") {
                       if InStr(FileExist(current "\" A_LoopField), "D") {
                          FileRemoveDir, % current "\" A_LoopField, 1
                          if InStr(FileExist(current "\" A_LoopField), "D") {
-                             MsgBox, 262144, ERROR, % "Busy folder:`n`n" current "\" A_LoopField
+                             MsgBox, % 262144 + 16, ERROR, % "Busy folder:`n`n" current "\" A_LoopField
                              result:=0
 					              return
                          }
@@ -2946,7 +3216,7 @@ download(url, to, option:="") {
 				  }
 			   }
             if anomaly {
-               MsgBox, 262144, ERROR, % "Anomaly was detected, please update the tool manually from an official site."
+               MsgBox, % 262144 + 16, ERROR, % "Anomaly was detected, please update the tool manually from an official site."
                gotolink("https://github.com/BlassGO/AutoIMG")
 					result:=0
             }
@@ -2987,17 +3257,17 @@ update(img, dest, nofind := "") {
 	if (serial && !check_active(serial))
        return 0
 	if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The update function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The update function is not supported from fastboot
 	   return 0
 	}
 	run_binary("dd") && dd := true
 	run_binary("cat") && cat := true
 	if !dd && !cat {
-	   MsgBox, 262144, ERROR, update: No available actions found on the device
+	   MsgBox, % 262144 + 16, ERROR, update: No available actions found on the device
 	   return 0 
 	}
     if !exist_file(img) {
-	   MsgBox, 262144, ERROR, % "Cant find " img " on the device"
+	   MsgBox, % 262144 + 16, ERROR, % "Cant find " img " on the device"
        return 0
 	}
 	if !nofind {
@@ -3023,7 +3293,7 @@ update(img, dest, nofind := "") {
    write_file(result, general_log)
 	if InStr(result, "ERROR: ") {
 	   print(">> Cant update " ubasename(img))
-      MsgBox, 262144, ERROR, % " Some problem updating " ubasename(img) " in " dest
+      MsgBox, % 262144 + 16, ERROR, % " Some problem updating " ubasename(img) " in " dest
 	   return 0
 	}
 	return 1
@@ -3043,7 +3313,7 @@ update_push(img, dest, nofind := "") {
 }
 get_cmdline(prop) {
    if !run_binary("cat") {
-      MsgBox, 262144, ERROR, get_cmdline: cat command not supported on device
+      MsgBox, % 262144 + 16, ERROR, get_cmdline: cat command not supported on device
 	  return
    }
    get := Trim(adb_shell("temp=$(cat /proc/cmdline 2>/dev/null); try=${temp#*" prop "=}; if [ ""$temp"" = ""$try"" ]; then cat /proc/bootconfig 2>/dev/null; else echo ${try%% *}; fi"), "`n`r" A_Space "`t")
@@ -3060,7 +3330,7 @@ get_slot() {
    if (serial && !check_active(serial))
       return
    if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The get_slot function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The get_slot function is not supported from fastboot
 	   return
 	}
    sslot=
@@ -3091,7 +3361,7 @@ find_block(name) {
    if (serial && !check_active(serial))
       return
    if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The find_block function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The find_block function is not supported from fastboot
 	   return
 	}
    if !IsObject(cache)
@@ -3106,10 +3376,10 @@ find_block(name) {
 	  if try && exist_file(try) {
 	     block := try
 	  } else {
-	     MsgBox, 262144, ERROR, % "Cant find " name " partition"
+	     MsgBox, % 262144 + 16, ERROR, % "Cant find " name " partition"
 	  }
    } else {
-      MsgBox, 262144, ERROR, find_block: find command not supported on device
+      MsgBox, % 262144 + 16, ERROR, find_block: find command not supported on device
 	  return
    }
    return block
@@ -3122,16 +3392,16 @@ get_twrp_ramdisk(ramdisk) {
    if (serial && !check_active(serial))
       return 0
    if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The get_twrp_ramdisk function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The get_twrp_ramdisk function is not supported from fastboot
 	   return 0
    }
    run_binary("cpio") && cpio := true
    if !cpio {
-	   MsgBox, 262144, ERROR, get_twrp_ramdisk: No available actions found on the device: cpio
+	   MsgBox, % 262144 + 16, ERROR, get_twrp_ramdisk: No available actions found on the device: cpio
 	   return 0 
    }
    if !exist_file("/ramdisk-files.txt") {
-      MsgBox, 262144, ERROR, Your current Recovery does not support building ramdisk A/B
+      MsgBox, % 262144 + 16, ERROR, Your current Recovery does not support building ramdisk A/B
 	  return 0
    }
    result := run_binary("cpio", "-H newc -o < /ramdisk-files.txt > " """" ramdisk """")
@@ -3147,16 +3417,16 @@ update_ramdisk(ramdisk, part := ""){
    if (serial && !check_active(serial))
       return 0
    if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The update_ramdisk function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The update_ramdisk function is not supported from fastboot
 	   return 0
    }
    run_binary("magiskboot") && magiskboot := true
    if !magiskboot {
-	   MsgBox, 262144, ERROR, Your current Recovery does not support boot.img building: magiskboot is needed
+	   MsgBox, % 262144 + 16, ERROR, Your current Recovery does not support boot.img building: magiskboot is needed
 	   return 0 
    }
    if !exist_file(ramdisk) {
-	   MsgBox, 262144, ERROR, % "Cant find " ramdisk " on the device"
+	   MsgBox, % 262144 + 16, ERROR, % "Cant find " ramdisk " on the device"
        return 0
    }
    TMP := ensure_tmp()
@@ -3300,7 +3570,7 @@ update_ramdisk(ramdisk, part := ""){
    result:=sh(sramdisk)
    write_file(result, general_log)
    if InStr(result, "ERROR: ") {
-	   MsgBox, 262144, ERROR, Cant update ramdisk in %boot%
+	   MsgBox, % 262144 + 16, ERROR, Cant update ramdisk in %boot%
 	   return 0
    }
    return 1
@@ -3313,7 +3583,7 @@ update_ramdisk_push(ramdisk, part := "") {
     if (serial && !check_active(serial))
        return 0
     if (device_mode="fastboot") {
-	    MsgBox, 262144, ERROR, The update_ramdisk_push function is not supported from fastboot
+	    MsgBox, % 262144 + 16, ERROR, The update_ramdisk_push function is not supported from fastboot
 	    return 0
     }
 	TMP := ensure_tmp()
@@ -3337,16 +3607,16 @@ update_kernel(kernel, part := ""){
    if (serial && !check_active(serial))
       return 0
    if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The update_ramdisk function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The update_ramdisk function is not supported from fastboot
 	   return 0
    }
    run_binary("magiskboot") && magiskboot := true
    if !magiskboot {
-	   MsgBox, 262144, ERROR, Your current Recovery does not support kernel updating
+	   MsgBox, % 262144 + 16, ERROR, Your current Recovery does not support kernel updating
 	   return 0 
    }
    if !exist_file(kernel) {
-	   MsgBox, 262144, ERROR, % "Cant find " kernel " on the device"
+	   MsgBox, % 262144 + 16, ERROR, % "Cant find " kernel " on the device"
        return 0
    }
    TMP := ensure_tmp()
@@ -3446,7 +3716,7 @@ update_kernel(kernel, part := ""){
    result:=sh(skernel)
    write_file(result, general_log)
    if InStr(result, "ERROR: ") {
-	   MsgBox, 262144, ERROR, Cant update kernel in %boot%
+	   MsgBox, % 262144 + 16, ERROR, Cant update kernel in %boot%
 	   return 0
    }
    return 1
@@ -3459,7 +3729,7 @@ update_kernel_push(kernel, part := "") {
     if (serial && !check_active(serial))
        return 0
     if (device_mode="fastboot") {
-	    MsgBox, 262144, ERROR, The update_kernel_push function is not supported from fastboot
+	    MsgBox, % 262144 + 16, ERROR, The update_kernel_push function is not supported from fastboot
 	    return 0
     }
 	TMP := ensure_tmp()
@@ -3483,7 +3753,7 @@ install_recovery_ramdisk(part := "") {
     if (serial && !check_active(serial))
        return 0
     if (device_mode="fastboot") {
-	    MsgBox, 262144, ERROR, The install_recovery_ramdisk function is not supported from fastboot
+	    MsgBox, % 262144 + 16, ERROR, The install_recovery_ramdisk function is not supported from fastboot
 	    return 0
     }
    TMP := ensure_tmp()
@@ -3508,16 +3778,16 @@ decompress(file, dest := ""){
    if (serial && !check_active(serial))
       return
    if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The decompress function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The decompress function is not supported from fastboot
 	   return
    }
    run_binary("magiskboot") && magiskboot := true
    if !magiskboot {
-	   MsgBox, 262144, ERROR, Cant find magiskboot
+	   MsgBox, % 262144 + 16, ERROR, Cant find magiskboot
 	   return
    }
    if !exist_file(file) {
-	   MsgBox, 262144, ERROR, % "Cant find " file " on the device"
+	   MsgBox, % 262144 + 16, ERROR, % "Cant find " file " on the device"
        return
    }
    base := "magiskboot decompress " """" file """"
@@ -3538,16 +3808,16 @@ recompress(file, format, dest := ""){
    if (serial && !check_active(serial))
       return 0
    if (device_mode="fastboot") {
-	   MsgBox, 262144, ERROR, The recompress function is not supported from fastboot
+	   MsgBox, % 262144 + 16, ERROR, The recompress function is not supported from fastboot
 	   return 0
    }
    run_binary("magiskboot") && magiskboot := true
    if !magiskboot {
-	   MsgBox, 262144, ERROR, Cant find magiskboot
+	   MsgBox, % 262144 + 16, ERROR, Cant find magiskboot
 	   return 0
    }
    if !exist_file(file) {
-	   MsgBox, 262144, ERROR, % "Cant find " file " on the device"
+	   MsgBox, % 262144 + 16, ERROR, % "Cant find " file " on the device"
        return 0
    }
    base := "magiskboot compress=" format " " """" file """"
@@ -3557,7 +3827,7 @@ recompress(file, format, dest := ""){
    result := adb_shell(base)
    if !InStr(result, "Success"){
       write_file(result, general_log)
-      MsgBox, 262144, ERROR, % "Some problem compressing " file " as " format
+      MsgBox, % 262144 + 16, ERROR, % "Some problem compressing " file " as " format
 	  return 0
    }
    return 1
@@ -3617,7 +3887,7 @@ gotolink(link) {
 	  try {
 		 Run, % link
 	  } catch {
-		 MsgBox, 262144, ERROR,  % "Cant open link: `n`n" link
+		 MsgBox, % 262144 + 16, ERROR,  % "Cant open link: `n`n" link
 		 return 0
 	  }
    } else {
@@ -3747,7 +4017,7 @@ wipe_env(reset := false) {
 read_config(file) {
    global secure_user_info, current, anti_notspam, CONFIG
    if !InStr(FileExist(file), "A") {
-      MsgBox, 262144, ERROR, % "Cant find file: " file
+      MsgBox, % 262144 + 16, ERROR, % "Cant find file: " file
 	  return 0
    }
    CONFIG:=file
@@ -3787,11 +4057,11 @@ Gui, Add, Text, Y+0 c00adc9 Section vheader, %name%
 Gui, Font, s10, %style%
 Gui, Add, Text, X+0 YP+10 c1FB012 vline, ------
 Gui, Add, Button, center X+0 YS+5 h30 w100 gfind_device vfind_device, Find My Device
-Gui, Add, Tab2, x%mx% Y+10 vtabs hwndtabshw Group +Theme -Background,, Home|Reboot|Settings|Wifi|Info
+Gui, Add, Tab2, x%mx% Y+10 vtabs hwndtabshw Group +Theme -Background,, Home|Actions|Settings|Wifi|Info
 Gui, Tab, 1
 Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5, Build: %build_author%/%build_date%
-Gui, Add, Text, YP+30 XP+10 Section, Select .IMG or Config: 
-Gui, Add, Button, center X+10 YP h20 w100 gselect, Select File
+Gui, Add, Text, YP+30 XP+10 Section, Select installation file:
+Gui, Add, Button, center X+13 YP h20 w100 gselect, Select File
 Gui, Add, Button, center X+5 YP h20 w20 hwndclean gclean
 Opt1 := [0, clean_normal]                                          
 Opt2 := {2: clean_hot}                                      
@@ -3808,11 +4078,21 @@ Gui, Font, s9, %style%
 Gui, Add, Checkbox, YP+4 XS+155 vformat_data gsave_preferences Section, Format Data
 Gui, Add, Checkbox, XS Y+4 vdisable_verify gsave_preferences, Disable Verify
 Gui, Add, Checkbox, XP Y+4 vreboot gsave_preferences, Reboot
-Gui, Font, s10, %style%
 Gui, Tab, 2
-Gui, Add, Button, center x%mx% Y+10 h60 w130 0x200 border gonly_reboot vonly_reboot Section, Reboot
-Gui, Add, Button, center X+10 YP h60 w130 0x200 border greboot_fastboot vreboot_fastboot, Fastboot
-Gui, Add, Button, center XP-70 Y+10 h60 w130 0x200 border greboot_recovery, Recovery
+Gui, Font, s10, Arial Black
+Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5 Section, Reboot
+Gui, Font, s10, %style%
+Gui, Add, Button, center XP+10 YP+30 h40 w80 0x200 border gonly_reboot vonly_reboot, Reboot
+Gui, Add, Button, center X+10 YP h40 w80 0x200 border greboot_fastboot vreboot_fastboot, Fastboot(D)
+Gui, Add, Button, center X+10 YP h40 w80 0x200 border greboot_recovery, Recovery
+Gui, Font, s10, Arial Black
+Gui, Add, GroupBox, XS Y+10 h%boxH% w%boxW% c254EC5, Extra Actions
+Gui, Font, s10, %style%
+Gui, Add, Text, XP+10 YP+30 Section, Remove bloatware: 
+Gui, Font, s10, Arial Black
+Gui, Add, Text, X+10 YS c254EC5, -►
+Gui, Font, s10, %style%
+Gui, Add, Button, center X+5 YP-10 h40 w100 gapp_manager, App Manager
 Gui, Tab, 3
 Gui, Font, s10, Arial Black
 Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5 Section, General Configs
@@ -3854,8 +4134,9 @@ Gui, Tab, 5
 Gui, Font, s10, Arial Black
 Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5, General Info
 Gui, Font, s10, %style%
-Gui, Add, Text, YP+30 XP+10 , This tool automates and improves the`nfastboot users experience.
-Gui, Add, Text, Y+10 XP+10 cgreen Section, Tool Name:
+Gui, Add, Text, YP+30 XP+10 Section, Multipurpose ADB-Fastboot Tool
+Gui, Add, Button, center X+10 YP-10 h40 gcheck_update, Check`nupdates
+Gui, Add, Text, YS+30 XS+10 cgreen Section, Tool Name:
 if (original_author!=maintainer_build_author)
    Gui, Add, Text, Y+10 XP cgreen, Maintainer:
 Gui, Add, Text, Y+10 XP cgreen, Developer:
@@ -3876,16 +4157,29 @@ WinGetPos, toolX, toolY, toolW, toolH, ahk_id %toolid%
 OnMessage(WM_LBUTTONDOWN := 0x201, "eventHandler")
 OnMessage(WM_LBUTTONUP := 0x202, "eventHandler")
 OnMessage(WM_LBUTTONDBLCLK := 0x203, "eventHandler")
+OnMessage(WM_COMMNOTIFY := 0x44, "eventHandler") 
 CtlColor_Edit(fromurlid,0xE4F4F4, 0x12A1A1)
 OnExit, GuiClose
 enable_bar()
 disable_bar()
 gosub update_preferences
-print(">> Checking integrity")
+print(">> Integrity: Checking...")
 check_bin()
+print(">> Integrity: Success")
+secure_user_info:=""
+return
+
+check_update:
 web_config("https://raw.githubusercontent.com/BlassGO/auto_img_request/main/support.config", 3000, true)
 load_config(,,,,,true)
-secure_user_info:=""
+return
+
+app_manager:
+   if !exist_device {
+	    MsgBox, % 262144 + 64, HELP, First find your device
+   } else {
+       app_manager(file)
+   }
 return
 
 device_manager:
@@ -3910,11 +4204,11 @@ return
 connect:
 	Gui, 1:Submit, NoHide
 	if !(ip ~= ip_check) {
-	   MsgBox, 262144, HELP, % "Invalid IP: """ ip """"
+	   MsgBox, % 262144 + 16, HELP, % "Invalid IP: """ ip """"
 	   return
 	}
 	if !(port ~= "^\d+$") {
-	   MsgBox, 262144, HELP, % "Invalid PORT: """ port """"
+	   MsgBox, % 262144 + 16, HELP, % "Invalid PORT: """ port """"
 	   return
 	}
 	IniRead, preferences, % current "\configs.ini", GENERAL, preferences, 0
@@ -4042,7 +4336,7 @@ select:
          ext := "*." formats
       }
    }
-	(!ext) ? ext := "*.img;*.config;*.zip;*.apk;*.cpio"
+	(!ext) ? ext := "*.img;*.config;*.zip;*.apk;*.cpio;*.aid"
 	if (part && part!="None") && (install_files[install_files.MaxIndex()].part!=part) {
       install_files[install_files.MaxIndex()].part := part
    }
@@ -4071,11 +4365,20 @@ select:
        print(">> Loaded RAMDISK: " + basename(file))
 		 GuiControl, 1:, partition, RAMDISK FILE
 		 install(file, "RAMDISK FILE")
+     } else if (ext="aid") {
+       switch (SubStr(ObjHeader(file),0))
+       {
+         case "A":
+            gosub app_manager
+         case "I":
+            install_manager(file)
+       }
 	  } else {
 		 print(">> Loaded: " + basename(file))
 		 GuiControl, 1:, partition, % simplename(file)
 		 install(file, simplename(file))
 	  }
+     file:=""
 	}
 return
 
@@ -4084,7 +4387,7 @@ only_reboot:
 	if (serial && !check_active(serial))
 	   return
 	if !exist_device {
-	    MsgBox, 262144, HELP, First find your device
+	    MsgBox, % 262144 + 64, HELP, First find your device
 	} else {
 		print(">> Rebooting...")
 		if (device_mode!="fastboot") {
@@ -4103,7 +4406,7 @@ reboot_recovery:
 	if (serial && !check_active(serial))
 	   return
 	if !exist_device {
-	    MsgBox, 262144, HELP, First find your device
+	    MsgBox, % 262144 + 64, HELP, First find your device
 	    return
 	} else {
 		print(">> Rebooting in recovery...")
@@ -4123,7 +4426,7 @@ reboot_fastboot:
 	if (serial && !check_active(serial))
 	   return
 	if !exist_device {
-	  MsgBox, 262144, HELP, First find your device
+	  MsgBox, % 262144 + 64, HELP, First find your device
 	  return
 	} else {
 		if (device_mode!="fastboot") {
@@ -4145,7 +4448,7 @@ install:
 	if (serial && !check_active(serial))
 	   return
 	if !exist_device {
-	  MsgBox, 262144, HELP, First find your device
+	  MsgBox, % 262144 + 64, HELP, First find your device
 	  return
 	}
 	if (part && part!="None") && (install_files[install_files.MaxIndex()].part!=part) {
@@ -4166,7 +4469,7 @@ install:
       }
    }
    while (to_install_ramdisk>1)&&!question("HUH","Do you really want to install more than one Ramdisk?") {
-         MsgBox, 262144, HELP, Okay, disable unwanted Ramdisks
+         MsgBox, % 262144 + 64, HELP, Okay, disable unwanted Ramdisks
          install_manager()
          to_install_ramdisk=0
          for index, file in install_files {
@@ -4202,7 +4505,7 @@ install:
       }
    }
 	if !(to_install||to_install_zip||to_install_ramdisk||to_remove||to_create) && (format_data!=1) {
-	  MsgBox, 262144, HELP, Please enable at least one action/installation
+	  MsgBox, % 262144 + 64, HELP, Please enable at least one action/installation
 	  return
    } else if !to_install && to_install_ramdisk {
       goto ramdisk_install
@@ -4308,7 +4611,7 @@ ramdisk_install:
          if run_binary("magiskboot") {
             print("YEAH")
          } else {
-            MsgBox, 262144, ERROR, You did not install MAGISK on your device, it is needed for Ramdisk patching
+            MsgBox, % 262144 + 16, ERROR, You did not install MAGISK on your device, it is needed for Ramdisk patching
             print("NAO"), disable_bar()
             return
          }
@@ -4388,8 +4691,6 @@ recovery_install:
    }
 return
 
-
-Esc::
 finish:
 GuiEscape:
 GuiClose:

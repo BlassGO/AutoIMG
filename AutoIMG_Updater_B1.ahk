@@ -40,9 +40,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.3.0
+version = 1.3.1
 status = Beta
-build_date = 08.10.2023
+build_date = 14.10.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -315,14 +315,13 @@ eventHandler(wParam, lParam, msg, hwnd) {
 	, WM_LBUTTONDBLCLK := 0x203
 	, WM_CHAR := 0x102
 	, lButtonDownTick := 0
-	global clicktime := 0
-	global generalbox
+	global clicktime:=0, generalbox, consolehwnd
 	if (msg = WM_LBUTTONDOWN) {
 		lButtonDownTick := A_TickCount
 	} else if (msg = WM_LBUTTONUP) {
 		clicktime := A_TickCount - lButtonDownTick
-	} else if (hwnd = generalbox) && (msg = WM_LBUTTONDBLCLK) {
-	    gosub console
+	} else if (hwnd = generalbox || hwnd = consolehwnd) && (msg = WM_LBUTTONDBLCLK) {
+	    copy_log(hwnd,A_Gui)
 	} else if (wParam = 1027) {
       Process, Exist 
       DetectHiddenWindows, On 
@@ -332,6 +331,12 @@ eventHandler(wParam, lParam, msg, hwnd) {
       } 
    }
 	return 
+}
+copy_log(hwnd,gui) {
+   GuiControlGet, Prev, % gui ":", %hwnd%
+	ToolTip, Copied log
+	Clipboard := "", Clipboard := Prev
+	SetTimer, RemoveToolTip, -1000
 }
 CountMatch(str, match) {
 	_pos:=1,_total:=0,_with:=StrLen(match)
@@ -1100,7 +1105,7 @@ add_progress(progress) {
    }
 }
 run_cmd(code, seconds:="") {
-   global secure_user_info, current, tools, extras, exitcode
+   global secure_user_info, current, tools, extras, exitcode, cmdpid
    static allowed_actions
    (!allowed_actions) ? allowed_actions := tools "\adb.exe," . tools "\fastboot.exe," . "java -version," . "java -jar """ tools "\apktool.jar""," . "java -jar """ tools "\sign.jar""," . tools "\zipalign.exe," . tools "\7za.exe,"
    exitcode=
@@ -1113,51 +1118,40 @@ run_cmd(code, seconds:="") {
          }
       }
 	  if !allowed || (code ~= "[;%{}()[\]*^><&|](?=[^""\\]*(?:""[^""\\]*""[^""\\]*)*$)") {
-         MsgBox, 262148, WARNING, % " Unusual actions attempted:`n`n " code "`n`n Do you want to allow it?"
+        MsgBox, 262148, WARNING, % " Unusual actions attempted:`n`n " code "`n`n Do you want to allow it?"
 	     IfMsgBox No
 	     {
 	        return 0
 	     }
 	  }
    }
-   code .= " 2>&1"
-   back := A_DetectHiddenWindows
    DetectHiddenWindows, On
    Run, %comspec% /k,, Hide, cmdpid
    WinWait, ahk_pid %cmdpid%
    DllCall("AttachConsole", "UInt", cmdpid)
-   code := comspec . " /c """ . code . """"
-   shell := comobjcreate("wscript.shell")
-   exec := (shell.exec(code))
+   shell:=comobjcreate("wscript.shell"), exec:=(shell.exec(comspec . " /c """ . code . " 2>&1"""))
    if (seconds ~= "^[1-9][0-9]*$") {
 	   SetTimer, cmd_output, % seconds * 1000
 	   While (!exec.Status)
 	   {
 		  Sleep, 100
 	   }
-	   exitcode := exec.ExitCode
+	   exitcode:=exec.ExitCode
 	   SetTimer, cmd_output, Off
    }
-   if (result=="") {
-      result := exec.stdout.readall()
-	  if (exitcode=="")
-	     exitcode := exec.ExitCode
-   }
+   (result="") ? result:=exec.stdout.readall()
+	(exitcode="") ? exitcode:=exec.ExitCode
    Process, Exist, % cmdpid
    if ErrorLevel {
       DllCall("FreeConsole")
       exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
       Process, Close, % cmdpid
    }
-   DetectHiddenWindows, % back
-   return JEE_StrUtf8BytesToText(result)
+   return JEE_StrUtf8BytesToText(result),cmdpid:=""
    cmd_output:
-   if (exitcode=="") {
-	   if (exec.Status==1) {
-		  result := exec.stdout.readall()
-	   } else {
-	      result := 0
-	   }
+   if (exitcode="") {
+      result:=(exec.Status=1)?exec.stdout.readall():0
+      DllCall("FreeConsole")
 	   exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
       Process, Close, % cmdpid
    }
@@ -1214,9 +1208,7 @@ fastboot_serial(action, this_serial := "", seconds:="") {
    return (this_serial) ? fastboot("-s " this_serial " " action, seconds) : ((serial) ? fastboot("-s " serial " " action, seconds) : 0)
 }
 is_active(serial) {
-   global exist_device
-   global device_mode
-   global remember_mode
+   global exist_device, device_mode, remember_mode
    if !serial
       return 0
    if (remember_mode=="fastboot") {
@@ -1917,8 +1909,72 @@ to_bytes(size) {
       return
    }
 }
+console(title:="AutoIMG-Console",tool:="",w:=600,h:=300) {
+   global mx, my, style, cmdpid, console_command, console_tool, consolehwnd
+   static GuiHwnd
+   if tool.MaxIndex() {
+      for cont, file in tool
+      {
+         if InStr(FileExist(file), "A") {
+            (list) ? list.="|"
+            list.=basename(file)
+         } else {
+            MsgBox, % 262144 + 16, HUH, Cant find file:`n`n%file%
+            return 0
+         }
+      }
+   } else {
+     return 0
+   }
+   Gui con: Default 
+   Gui con: +HwndGuiHwnd +AlwaysOnTop
+   Gui con: margin, 0, 0
+   Gui con: Font, s10, %style%
+   Gui con: Add, DropDownList, AltSubmit center x5 y5 w100 vconsole_tool, % list
+   Gui con: Font, s10 w700 cC0C0C0, Courier New
+   Gui con: Color,, 000000
+   Gui con: Add, Edit, % "X+5 YP vconsole_command w" . w - 130,
+   Gui con: Add, Button, Hidden Default w0 h0 gconsole_event, RUN
+   Gui con: Add, Edit, Hwndconsolehwnd x0 Y+5 w%w% h%h% 0x200 border HScroll,
+   Gui con: Show, Autosize Center, % title
+   GuiControl, con:Choose, console_tool, 1
+   ;WinSet, Transparent, 230, ahk_id %GuiHwnd%
+   Gui con: +LastFound
+   Sleep 50
+   ControlFocus, console_command, ahk_class AutoHotkeyGUI 
+   WinWaitClose
+   return
+   console_event:
+   Gui con: Submit, NoHide
+   GuiControlGet, command, con:, console_command
+   if command:=Trim(command) {
+      stdout.="> " . basename(tool[console_tool]) . A_Space . command . "`r`n`r`n", command:="""" . tool[console_tool] . """ " . StrReplace(command, "\""", "\\\""")
+      shell:=comobjcreate("wscript.shell"), exec:=(shell.exec(comspec . " /c """ . command . " 2>&1""")), cmdpid:=exec.ProcessID
+      while,!exec.StdOut.AtEndOfStream
+      {
+         GuiControl, con:, %consolehwnd%, % stdout.="   " . exec.StdOut.readline() . "`r`n"
+      }
+      GuiControl, con:, %consolehwnd%, % stdout.="`r`n"
+      SendMessage, EM_SETSEL:=0x00B1, -2, -1, , ahk_id %consolehwnd%
+      PostMessage, EM_SCROLLCARET:=0xB7, 0, 0,, ahk_id %consolehwnd%
+      exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
+      Process, Close, % cmdpid
+      cmdpid:=""
+   }
+   return
+   conGuiClose:
+   if cmdpid {
+      exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
+      Process, Close, % cmdpid
+      cmdpid:=""
+   }
+   if console_tool
+      Process, Close, % basename(tool[console_tool])
+   Gui con: Destroy
+   return
+}
 app_manager(list:="") {
-   global mx, my, style, appcontrol, HeaderColors, serial, currentdevice, app_manager, general_log, current, appcontrol_icons, to_find, default_mode_app, default_mode_app_type
+   global mx, my, style, appcontrol, HeaderColors, serial, currentdevice, app_manager, general_log, current, appcontrol_icons, to_find, default_mode_app, default_mode_app_type, total_apps, to_install, to_uninstall
    StringCaseSense, Off
    if serial && !check_active(serial)
       return 0
@@ -1934,7 +1990,7 @@ app_manager(list:="") {
          return 0
       }
    } else {
-      state:={}
+      list:="",state:={}
    }
    Print(">> Manager: Loading apps...")
    app:={}
@@ -1958,7 +2014,7 @@ app_manager(list:="") {
    IniRead, app_msg, % current "\configs.ini", GENERAL, app_msg, 0
    (app_msg=0) ? help(current "\images\app_guide.png", "Please note that UNMARKED apps will be uninstalled.")
    IniWrite, 1, % current "\configs.ini", GENERAL, app_msg
-   Gui app: Destroy 
+   Gui app: New 
    Gui app: Default 
    Gui app: +AlwaysOnTop
    Gui app: margin, %mx%, %my%
@@ -1967,7 +2023,15 @@ app_manager(list:="") {
    Gui app: Add, DropDownList, AltSubmit center X+0 YP w100 vdefault_mode_app gappcontrol_find, All apps|Enabled|Disabled|Uninstalled
    Gui app: Add, DropDownList, AltSubmit center X+0 YP w100 vdefault_mode_app_type gappcontrol_find, System-User|System|User
    Gui app: Add, ListView, AltSubmit -ReadOnly hwndappmanager NoSortHdr -LV0x10 LV0x20 Checked gappcontrol vappcontrol XS Y+0 w520 h200, |Name|Package|Path
-   Gui app: Add, Text, XS+30 Y+10 Section, The changes will not be applied unless you click
+   Gui app: Font, s9, %style%
+   Gui app: Add, Text, XS Y+0, Total apps:
+   Gui app: Add, Text, X+5 YP vtotal_apps, %total_apps%
+   Gui app: Add, Text, X+130 YP, UNINSTALL:
+   Gui app: Add, Text, X+5 YP vto_uninstall, 0
+   Gui app: Add, Text, X+150 YP, INSTALL:
+   Gui app: Add, Text, X+5 YP vto_install, 0
+   Gui app: Font, s10, %style%
+   Gui app: Add, Text, XS+30 Y+20 Section, The changes will not be applied unless you click
    Gui app: Add, Text, XP Y+15, You can export your current selection
    Gui app: Add, Text, XP Y+20, You can switch between Icon Mode
    Gui app: Font, s10, Arial Black
@@ -1980,26 +2044,52 @@ app_manager(list:="") {
    Gui app: Add, Button, center XP Y+5 h30 w100 gappcontrol_icons vappcontrol_icons, LOAD ICONS
    GuiControl, app:Choose, default_mode_app, 1
    GuiControl, app:Choose, default_mode_app_type, 1
+   if list {
+      to_uninstall:=0, to_install:=0
+      for pkg, with_state in state
+      {
+         if app.HasKey(pkg) {
+            if !(app[pkg].state=with_state||(!with_state&&app[pkg].state=-1)) {
+               (app[pkg].state>0)?to_uninstall+=1:to_install+=1
+            }
+         }
+      }
+      GuiControl, app:, to_uninstall, % to_uninstall
+      GuiControl, app:, to_install, % to_install
+   }
    gosub appcontrol_find
    HHDR := DllCall("SendMessage", "Ptr", appmanager, "UInt", 0x101F, "Ptr", 0, "Ptr", 0, "UPtr") ; LVM_GETHEADER
    HeaderColors[HHDR] := {Txt: 0xFFFFFF, Bkg: 0x797e7f} ; BGR
    SubClassControl(appmanager, "HeaderCustomDraw")
    Gui app: show, AutoSize Center, App Manager
    WinSet, Redraw, , ahk_id %HHDR%
-   WinWaitClose, App Manager
+   Gui app: +LastFound
+   WinWaitClose
+   return
+   appGuiClose:
+   SubClassControl(appmanager, "")
    Gui app: Destroy
    return
    appcontrol:
-   If (A_GuiEvent == "I") {
-      If ((ErrorLevel == "C") || (ErrorLevel == "c")) && LV_GetText(pkg, A_EventInfo, 3) {
-         state[pkg]:=(ErrorLevel == "C") ? 1 : 0
+   on_action:=ErrorLevel, on_col:=LV_SubItemHitTest(appmanager)
+   GuiControl, app:-g, appcontrol
+   if (on_col=1) {
+      If (A_GuiEvent == "I") {
+         If ((on_action == "C") || (on_action == "c")) && LV_GetText(pkg, A_EventInfo, 3) {
+            state[pkg]:=(on_action == "C") ? 1 : 0
+            guikey:=(app[pkg].state>0)?"to_uninstall":"to_install"
+            GuiControlGet, count, app:, % guikey
+            GuiControl, app:, % guikey, % count + ((app[pkg].state=state[pkg]||(!state[pkg]&&app[pkg].state=-1)) ? -1 : 1)
+         }
+      }
+   } else if (on_col>1) {
+      If (A_GuiEvent == "DoubleClick" && LV_GetText(copy, A_EventInfo,on_col)) {
+         ToolTip, % "Copied " . copy
+         Clipboard := "", Clipboard := copy
+         SetTimer, RemoveToolTip, -1000
       }
    }
-   If (A_GuiEvent == "DoubleClick" && LV_GetText(copy, A_EventInfo,LV_SubItemHitTest(appmanager))) {
-      ToolTip, % "Copied " . copy
-	   Clipboard := "", Clipboard := copy
-	   SetTimer, RemoveToolTip, -1000
-   }
+   GuiControl, app:+gappcontrol, appcontrol
    return
    appcontrol_icons:
    if icons_mode {
@@ -2010,24 +2100,26 @@ app_manager(list:="") {
       icons_mode:=true
    }
    if icons_mode&&!loaded_icons {
-      Gui app: Default 
+      Gui app: Default
       LV_Delete()
       LV_Add("", "", "Loading icons...")
-      LV_Add("", "", "This process can take a long time.")
-      LV_ModifyCol(2, "AutoHdr"), FileCreateDir(dest:=current . "\tmp")
+      LV_Add("", "", "This process can take a long time."), LV_ModifyCol(2, "AutoHdr")
+      dest:=current . "\tmp"
+      FileCreateDir, % dest
+      FileRemoveDir, % dest . "\app_manager_icons", 1
       write_file(adb_shell("export CLASSPATH=/data/local/tmp/app_manager; (app_process / Main -icon /data/local/tmp/app_manager_icons) 2>/dev/null"),general_log)
       write_file(adb("pull /data/local/tmp/app_manager_icons """ . dest . """"),general_log)
-      dest.="\app_manager_icons"
+      dest.="\app_manager_icons\", default_icon:=current . "\images\app.png"
       for pkg, props in app
       {
-          app[pkg].icon:=(InStr(FileExist(out:=dest . "\" . pkg . ".png"), "A")) ? out : current . "\images\app.png"
+          app[pkg].icon:=(InStr(FileExist(out:=dest . pkg . ".png"), "A")) ? out : default_icon
       }
    }
    loaded_icons:=true
    gosub appcontrol_find
    return
    appcontrol_do:
-   Gui app: Destroy
+   gosub appGuiClose
    smanager:={}
    for pkg, with_state in state
    {
@@ -2943,7 +3035,7 @@ check_bin(force := "") {
       SHA256 ccdb7753cb2f065ba1ba9a83673073950fdac7a5744741d0f221b65d9fa754d3
 
       [extras\app_manager]
-      SHA256 6e3d83b6d78e3edb1ff36a753b86ce434ce495890b4b00e49507cce15fe0a501
+      SHA256 504d761817e842580f89fbba46ecce6b57aba5116df159fff9c8ce0bb90ea18b
 
 	  )
    }
@@ -4088,11 +4180,14 @@ Gui, Add, Button, center X+10 YP h40 w80 0x200 border greboot_recovery, Recovery
 Gui, Font, s10, Arial Black
 Gui, Add, GroupBox, XS Y+10 h%boxH% w%boxW% c254EC5, Extra Actions
 Gui, Font, s10, %style%
-Gui, Add, Text, XP+10 YP+30 Section, Remove bloatware: 
+Gui, Add, Text, XP+10 YP+30 Section, Remove bloatware:
+Gui, Add, Text, XP Y+30, Open the console: 
 Gui, Font, s10, Arial Black
-Gui, Add, Text, X+10 YS c254EC5, -►
+Gui, Add, Text, XS+130 YS c254EC5, -►
+Gui, Add, Text, XP Y+30 c254EC5, -►
 Gui, Font, s10, %style%
-Gui, Add, Button, center X+5 YP-10 h40 w100 gapp_manager, App Manager
+Gui, Add, Button, center X+5 YS-10 h40 w100 gapp_manager, App Manager
+Gui, Add, Button, center XP Y+10 h40 w100 guser_console, Console
 Gui, Tab, 3
 Gui, Font, s10, Arial Black
 Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5 Section, General Configs
@@ -4174,6 +4269,10 @@ web_config("https://raw.githubusercontent.com/BlassGO/auto_img_request/main/supp
 load_config(,,,,,true)
 return
 
+user_console:
+    console(,{1:adb, 2:fastboot})
+return
+
 app_manager:
    if !exist_device {
 	    MsgBox, % 262144 + 64, HELP, First find your device
@@ -4246,13 +4345,6 @@ return
 
 donate:
 	Run, https://paypal.me/blassgohuh?country.x=EC&locale.x=es_XC
-return
-
-console:
-	GuiControlGet, Prev, 1:, console
-	ToolTip, Copied log
-	Clipboard := "", Clipboard := Prev
-	SetTimer, RemoveToolTip, -1000
 return
 
 RemoveToolTip:
@@ -4694,6 +4786,13 @@ return
 finish:
 GuiEscape:
 GuiClose:
-	AnimateWindow(toolid, 500, EXIT_ANIM)
+   if !toolclosed&&cmdpid {
+      MsgBox, % 262144 + 4 + 32, WARNING, There are processes running`n`nDo you want to force them to terminate?
+      IfMsgBox, No
+        return
+      DllCall("FreeConsole")
+      Process, Close, % cmdpid
+   }
+   (!toolclosed) ? AnimateWindow(toolid, 500, EXIT_ANIM)
+   toolclosed:=true
 	ExitApp
-	Exit

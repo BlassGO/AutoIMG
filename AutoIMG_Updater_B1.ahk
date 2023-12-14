@@ -15,6 +15,7 @@ SetBatchLines -1
 #include edit_color.ahk
 #include obj_dump.ahk
 #include crypt.ahk
+#include gui_resize.ahk
 
 ; AHK2 configs
 ;@Ahk2Exe-SetName         AutoIMG
@@ -40,9 +41,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.3.1
+version = 1.3.2
 status = Beta
-build_date = 14.10.2023
+build_date = 13.12.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -77,7 +78,7 @@ ip_check := "((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9
 ; Check dependencies
 Folders := current "," current "\images," tools "," extras
 Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," 7za "," sign "," app_manager "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
-Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png,"
+Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png," current "\images\unauthorized.png,"
 Loop, parse, Folders, `,
 {
    If A_LoopField && !InStr(FileExist(A_LoopField), "D") {
@@ -1757,11 +1758,13 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
 				           device_mode=sideload   
 		             } else {
                       if (result ~= "\bunauthorized\b") {
-						       help(current "\images\dev_options.png", "A device was detected, but access is denied!`n`nPlease fix it manually:`nYou can try turning USB debugging off and on.")
+						       help(current "\images\unauthorized.png", "A device was detected, but access is denied!`n`nPlease fix it manually:`nYou can try turning USB debugging off and on.")
+                         print(">> Warning: Unauthorized device!")
 				             break
 		                } else {
                         if (result ~= "\boffline\b") {
                            help(current "\images\turn_on.png", "A device was detected, but it is inactive!`n`nPlease Turn On the Screen of your device to restore the connection.")
+                           print(">> Warning: Offline device!")
                            break
                         } else {
                            continue
@@ -1910,8 +1913,7 @@ to_bytes(size) {
    }
 }
 console(title:="AutoIMG-Console",tool:="",w:=600,h:=300) {
-   global mx, my, style, cmdpid, console_command, console_tool, consolehwnd
-   static GuiHwnd
+   global mx, my, style, cmdpid, console_command, console_tool, consolehwnd, console_commandhwnd, congui, conFind, confindgui, console_predict
    if tool.MaxIndex() {
       for cont, file in tool
       {
@@ -1923,54 +1925,156 @@ console(title:="AutoIMG-Console",tool:="",w:=600,h:=300) {
             return 0
          }
       }
+      tool.Push(comspec), list.="|cmd.exe"
    } else {
-     return 0
+      tool:={1: comspec}, list:="cmd.exe"
    }
+   DetectHiddenWindows, On
+   Gui confind: +Hwndconfindgui +AlwaysOnTop -Caption
+   Gui confind: Font, s10 w700 cC0C0C0, Courier New
+   Gui confind: Color,, 000000
+   Gui confind: Add, ListBox, vconFind gconfindselect x0 y0 w200 Center Sort,
    Gui con: Default 
-   Gui con: +HwndGuiHwnd +AlwaysOnTop
+   Gui con: +Hwndcongui +AlwaysOnTop +Resize
    Gui con: margin, 0, 0
    Gui con: Font, s10, %style%
-   Gui con: Add, DropDownList, AltSubmit center x5 y5 w100 vconsole_tool, % list
+   Gui con: Add, DropDownList, AltSubmit center x5 y5 w100 vconsole_tool Section, % list
    Gui con: Font, s10 w700 cC0C0C0, Courier New
    Gui con: Color,, 000000
-   Gui con: Add, Edit, % "X+5 YP vconsole_command w" . w - 130,
+   Gui con: Add, Edit, % "X+5 YP vconsole_command Hwndconsole_commandhwnd gconsole_find w" . w - 130,
    Gui con: Add, Button, Hidden Default w0 h0 gconsole_event, RUN
+   Gui con: Add, Button, XS Y+5 w100 gconsole_path, SET PATH
+   Gui con: Add, Button, X+5 YP w100 gconsole_select, SELECT FILE
+   Gui con: Add, CheckBox, X+5 YP w100 vconsole_predict gconsole_find cblack, Predictive
    Gui con: Add, Edit, Hwndconsolehwnd x0 Y+5 w%w% h%h% 0x200 border HScroll,
    Gui con: Show, Autosize Center, % title
    GuiControl, con:Choose, console_tool, 1
-   ;WinSet, Transparent, 230, ahk_id %GuiHwnd%
+   GuiControl, con:, console_predict, 1
+   ;WinSet, Transparent, 230, ahk_id %congui%
    Gui con: +LastFound
    Sleep 50
    ControlFocus, console_command, ahk_class AutoHotkeyGUI 
    WinWaitClose
    return
    console_event:
-   Gui con: Submit, NoHide
-   GuiControlGet, command, con:, console_command
-   if command:=Trim(command) {
-      stdout.="> " . basename(tool[console_tool]) . A_Space . command . "`r`n`r`n", command:="""" . tool[console_tool] . """ " . StrReplace(command, "\""", "\\\""")
-      shell:=comobjcreate("wscript.shell"), exec:=(shell.exec(comspec . " /c """ . command . " 2>&1""")), cmdpid:=exec.ProcessID
-      while,!exec.StdOut.AtEndOfStream
-      {
-         GuiControl, con:, %consolehwnd%, % stdout.="   " . exec.StdOut.readline() . "`r`n"
+      Gui con: Submit, NoHide
+      GuiControlGet, command, con:, console_command
+      if command:=Trim(command) {
+         if (tool[console_tool]=ComSpec) {
+            stdout.="> " . command . "`r`n`r`n", command:=StrReplace(command, "\""", "\\\""")
+         } else {
+            stdout.="> " . basename(tool[console_tool]) . A_Space . command . "`r`n`r`n", command:="""" . tool[console_tool] . """ " . StrReplace(command, "\""", "\\\""")
+         }
+         shell:=comobjcreate("wscript.shell"), exec:=(shell.exec(comspec . " /c """ . command . " 2>&1""")), cmdpid:=exec.ProcessID
+         while,!exec.StdOut.AtEndOfStream
+         {
+            GuiControl, con:, %consolehwnd%, % stdout.="   " . exec.StdOut.readline() . "`r`n"
+         }
+         GuiControl, con:, %consolehwnd%, % stdout.="`r`n"
+         SendMessage, EM_SETSEL:=0x00B1, -2, -1, , ahk_id %consolehwnd%
+         PostMessage, EM_SCROLLCARET:=0xB7, 0, 0,, ahk_id %consolehwnd%
+         exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
+         Process, Close, % cmdpid
+         cmdpid:=""
       }
-      GuiControl, con:, %consolehwnd%, % stdout.="`r`n"
-      SendMessage, EM_SETSEL:=0x00B1, -2, -1, , ahk_id %consolehwnd%
-      PostMessage, EM_SCROLLCARET:=0xB7, 0, 0,, ahk_id %consolehwnd%
-      exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
-      Process, Close, % cmdpid
-      cmdpid:=""
-   }
    return
    conGuiClose:
-   if cmdpid {
-      exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
-      Process, Close, % cmdpid
-      cmdpid:=""
-   }
-   if console_tool
-      Process, Close, % basename(tool[console_tool])
-   Gui con: Destroy
+      if cmdpid {
+         exec.StdOut.Close(),exec.StdErr.Close(),exec.StdIn.Close(),exec.Terminate()
+         Process, Close, % cmdpid
+         cmdpid:=""
+      }
+      if console_tool
+         Process, Close, % basename(tool[console_tool])
+      Gui con: Destroy
+      Gui confind: Destroy
+      SetWorkingDir, % A_ScriptDir
+      AutoXYWH("reset")
+   return
+   conGuiSize:
+      if (A_EventInfo = 1)
+         return
+      AutoXYWH("w", "console_command"), AutoXYWH("wh", consolehwnd)
+   return
+   console_find:
+      Sleep 250
+      Gui con: Submit, NoHide
+      if (console_predict=0) {
+         Gui confind: Hide
+         SetTimer, confindfollow, Off
+         return
+      }
+      GuiControlGet, command, con:, console_command
+      words:=""
+      if RegExMatch(command, "^(?:(?:\s*(?:""[^""]+""|\S+)\s+)*)\K(?:(?:""\K[^""]+)|\S+)$", command) {
+         len:=StrLen(command)
+         Loop, Files, % A_WorkingDir . "\*", FD
+         {
+            if (SubStr(A_LoopFileName,1,len)=command) {
+               (words) ? words.="|"
+               words.=A_LoopFileName
+            }
+         }
+      }
+      if words {
+         GuiControl, confind:, conFind, |%words%
+         SetTimer, confindfollow, 10
+         Gui confind: Show, Autosize Center
+      } else {
+         Gui confind: Hide
+         SetTimer, confindfollow, Off
+      }
+      GuiControl, con:Focus, console_command
+   return
+   console_path:
+      Gui con: -AlwaysOnTop
+      FileSelectFolder, from, , , Select the new work path:
+      if from {
+         SetWorkingDir, % from
+         GuiControl, con:Focus, console_command
+         GuiControl, con:, %consolehwnd%, % stdout.="> cd """ . from . """`r`n`r`n"
+         SendMessage, EM_SETSEL:=0x00B1, -2, -1, , ahk_id %consolehwnd%
+         PostMessage, EM_SCROLLCARET:=0xB7, 0, 0,, ahk_id %consolehwnd%
+      }
+      Gui con: +AlwaysOnTop
+   return
+   console_select:
+      Gui con: -AlwaysOnTop
+      Gui con: Submit, NoHide
+      FileSelectFile, file, 1, , Select a file as parameter, All Files (*.*)
+      if file {
+         GuiControl, con:, console_command, % console_command . " """ . file . """"
+         GuiControl, con:Focus, console_command
+         SendMessage, 0xB1, -2, -1,, ahk_id %console_commandhwnd%
+         SendMessage, 0xB7,,,, ahk_id %console_commandhwnd%
+         WinGetPos, toolX, toolY, toolW, toolH, ahk_id %congui%
+         WinMove, ahk_id %congui%,,,, toolW-1, toolH-1
+         WinMove, ahk_id %congui%,,,, toolW, toolH
+      }
+      Gui con: +AlwaysOnTop
+   return
+   confindselect:
+      if (A_GuiControlEvent="DoubleClick") {
+         Gui confind: Submit, NoHide
+         GuiControl, con:, console_command, % RegExReplace(console_command, "^(?:(?:\s*(?:""[^""]+""|\S+)\s+)*)\K(?:(?:""[^""]+)|\S+)$", """" . confind . """")
+         SendMessage, 0xB1, -2, -1,, ahk_id %console_commandhwnd%
+         SendMessage, 0xB7,,,, ahk_id %console_commandhwnd%
+         Gui confind: Hide
+         SetTimer, confindfollow, Off
+         WinGetPos, toolX, toolY, toolW, toolH, ahk_id %congui%
+         WinMove, ahk_id %congui%,,,, toolW-1, toolH-1
+         WinMove, ahk_id %congui%,,,, toolW, toolH
+      }
+   return
+   confindfollow:
+      WinGetPos, toolX, toolY, toolW, toolH, ahk_id %congui%
+      WinGetPos, newX, newY, newW, newH, ahk_id %confindgui%
+      if (toolY<newH) {
+         Gui con: -AlwaysOnTop
+         WinMove, ahk_id %confindgui%,, toolX + ((toolW - newW ) // 2), toolY + (newH+50)
+      } else {
+         WinMove, ahk_id %confindgui%,, toolX + ((toolW - newW ) // 2), toolY - newH
+      }
    return
 }
 app_manager(list:="") {
@@ -3117,15 +3221,17 @@ check_bin(force := "") {
    return 1
 }
 download(url, to, option:="") {
-   global secure_user_info, general_log, HERE, TOOL, current, adb, fastboot
+   global secure_user_info, general_log, HERE, TOOL, current, adb, fastboot, title
    GetFullPathName(to) ? to := GetFullPathName(to)
    if (to==current "\configs.ini") {
       MsgBox, 262144, Download Service, % " Attempting to replace:`n`n " to "`n`n This action is not allowed for your security"
       return 0
    }
+   pid:=DllCall("GetCurrentProcessId")
    updating_script=
    (
    :destroy
+   taskkill /F /PID %pid%
    del "%A_ScriptFullPath%"
    if exist "%A_ScriptFullPath%" goto destroy
    move "%to%" "%A_ScriptFullPath%"
@@ -3134,6 +3240,7 @@ download(url, to, option:="") {
    updating_script_zip=
    (
    :destroy
+   taskkill /F /PID %pid%
    del "%A_ScriptFullPath%"
    if exist "%A_ScriptFullPath%" goto destroy
    move "%current%\update.exe" "%A_ScriptFullPath%"
@@ -4792,6 +4899,7 @@ GuiClose:
         return
       DllCall("FreeConsole")
       Process, Close, % cmdpid
+      Run, taskkill /F /PID %cmdpid%, , Hide
    }
    (!toolclosed) ? AnimateWindow(toolid, 500, EXIT_ANIM)
    toolclosed:=true

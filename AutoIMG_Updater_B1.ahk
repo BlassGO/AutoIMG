@@ -41,9 +41,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.3.2
+version = 1.3.3
 status = Beta
-build_date = 13.12.2023
+build_date = 16.12.2023
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -78,7 +78,7 @@ ip_check := "((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9
 ; Check dependencies
 Folders := current "," current "\images," tools "," extras
 Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," 7za "," sign "," app_manager "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
-Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png," current "\images\unauthorized.png,"
+Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png," current "\images\unauthorized.png," current "\images\back.png," current "\images\delete.png," current "\images\export.png," current "\images\file.png," current "\images\folder.png," current "\images\link.png," current "\images\view.png,"
 Loop, parse, Folders, `,
 {
    If A_LoopField && !InStr(FileExist(A_LoopField), "D") {
@@ -93,6 +93,8 @@ Loop, parse, Files, `,
       ExitApp
    }
 }
+Loop 2
+    DllCall( "ChangeWindowMessageFilter", uInt, "0x" (i:=!i?49:233), uint, 1)
 
 ; Working PATHs
 EnvGet, native, PATH
@@ -152,6 +154,10 @@ GetFullPathName(path) {
 }
 AnimateWindow(hWnd,Duration,Flag) {
    return DllCall("AnimateWindow","UInt",hWnd,"Int",Duration,"UInt",Flag)
+}
+SetEditCueBanner(HWND, Cue) {  ; requires AHL_L, thanks to just.me (ahk forum)
+   Static EM_SETCUEBANNER := (0x1500 + 1)
+   Return DllCall("User32.dll\SendMessageW", "Ptr", HWND, "Uint", EM_SETCUEBANNER, "Ptr", True, "WStr", Cue)
 }
 LV_SubitemHitTest(HLV) {
    ; To run this with AHK_Basic change all DllCall types "Ptr" to "UInt", please.
@@ -1912,6 +1918,292 @@ to_bytes(size) {
       return
    }
 }
+file_manager(from:="/sdcard") {
+   global mx, my, style, explorer_list, to_find_exp, explorer_findhwnd, explorer, explorer_back, explorer_view, explorer_delete, explorer_export, current, guiexplorer, general_log, current_path, cache, exppermUID, exppermGID, exppermPERM, exppermCONTEXT, UID, GID, PERM, FCONTEXT
+   if !IsObject(cache)
+      optimize()
+	if !cache.commands.HasKey("ls") {
+      MsgBox, % 262144 + 16, ERROR, file_manager: The "ls" command do not exist on the device
+      return 0
+   }
+   if !(cache.commands.HasKey("rm")&&cache.commands.HasKey("mv")&&cache.commands.HasKey("cp")&&cache.commands.HasKey("chown")&&cache.commands.HasKey("chmod")&&cache.commands.HasKey("chcon")) {
+      MsgBox, % 262144 + 16, ERROR, file_manager: Some commands do not exist on the device, you may experience problems
+   }
+   Menu, MenuExp, Add, Delete, explorer_delete
+	Menu, MenuExp, Add, Export, explorer_export
+   Menu, MenuExp, Add, Permissions, explorer_permissions
+   Gui exp: New 
+   Gui exp: Default 
+   Gui exp: +AlwaysOnTop +Resize +Hwndguiexplorer
+   Gui exp: margin, %mx%, %my%
+   Gui exp: Font, s10, %style%
+   Gui exp: Add, Edit, w390 hwndexplorer_findhwnd vto_find_exp gexplorer_find Section,
+   Gui exp: Add, Picture, center X+0 YP w30 h30 vexplorer_back gexplorer_back, % current . "\images\back.png"
+   Gui exp: Add, Picture, center X+0 YP w30 h30 vexplorer_view gexplorer_view, % current . "\images\view.png"
+   Gui exp: Add, Picture, center X+0 YP w30 h30 vexplorer_delete gexplorer_delete, % current . "\images\delete.png"
+   Gui exp: Add, Picture, center X+0 YP w30 h30 vexplorer_export gexplorer_export, % current . "\images\export.png"
+   Gui exp: Add, Edit, w390 vcurrent_path XS Y+0 Center, %from%
+   Gui exp: Add, Button, Hidden +Default w0 h0 gupdate_path, SET
+   Gui exp: Add, ListView, AltSubmit +Multi -ReadOnly hwndexplorer NoSortHdr Sort -LV0x10 LV0x20 gexplorer_list vexplorer_list XS Y+0 w520 h400, Name|In Folder|Type
+   gosub explorer_load
+   Gui exp: show, AutoSize Center, File Manager
+   Gui exp: +LastFound
+   SetEditCueBanner(explorer_findhwnd, "Search by name...")
+   ControlFocus, current_path, ahk_class AutoHotkeyGUI 
+   WinWaitClose
+   return tree
+   expGuiClose:
+      Gui exp: Destroy
+      return
+   expGuiSize:
+      if (A_EventInfo = 1)
+         return
+      AutoXYWH("w", "to_find_exp", "current_path"), AutoXYWH("x", "explorer_back", "explorer_view", "explorer_delete", "explorer_export"), AutoXYWH("wh", explorer)
+   return
+   update_path:
+      Gui exp: Submit, NoHide
+      if current_path {
+         from:=current_path
+         goto explorer_load
+      }
+   return
+   explorer_back:
+      from:=(from="/") ? from : dirname(from)
+      (!from) ? from:="/"
+      goto explorer_load
+   return
+   explorer_view:
+      if list_mode {
+         GuiControl, exp:+Report, explorer_list
+      } else {
+         GuiControl, exp:+Icon, explorer_list
+      }
+      list_mode:=!list_mode
+   return
+   explorer_delete:
+      Gui exp: Default 
+      command:=""
+      for select in selected
+      {
+         LV_GetText(name, select, 1)
+         (A_Index=1) ? command.="("
+         command.="rm -rf """ . dir . name """; "
+      }
+      if command {
+         command.=") 2>/dev/null"
+         ToolTip, % "Deleting " . selected.Count() . " contents..."
+         write_file("`n(" . command . ") -> (" . adb_shell(command) . ")`n", general_log)
+         SetTimer, RemoveToolTip, -100
+         goto explorer_load
+      }
+   return
+   explorer_permissions:
+      Gui exp: Default 
+      if selected.Count() {
+         Gui exp: -AlwaysOnTop
+         Gui expperm: New 
+         Gui expperm: +AlwaysOnTop
+         Gui expperm: margin, %mx%, %my%
+         Gui expperm: Font, s10, %style%
+         Gui expperm: Add, Text, Section, set_perm 
+         Gui expperm: Add, Edit, X+5 YP w100 hwndexppermUID vUID Center,
+         Gui expperm: Add, Edit, X+5 YP w100 hwndexppermGID vGID Center,
+         Gui expperm: Add, Edit, X+5 YP w100 hwndexppermPERM vPERM Center,
+         Gui expperm: Add, Text, XS Y+5 Section, set_context 
+         Gui expperm: Add, Edit, X+5 YP w200 hwndexppermCONTEXT vFCONTEXT Center,
+         Gui expperm: Add, Button, XS+80 Y+5 w200 Center gexppermAPPLY, APPLY
+         Gui expperm: show, AutoSize Center, Set Permissions
+         SetEditCueBanner(exppermUID, "User ID: 0"), SetEditCueBanner(exppermGID, "Group ID: 0"), SetEditCueBanner(exppermPERM, "MODE: 0755"), SetEditCueBanner(exppermCONTEXT, "u:object_r:system_file:s0")
+         WinWaitClose, Set Permissions
+         return
+      }
+      Gui exp: +LastFound
+   exppermGuiClose:
+      Gui expperm: Destroy
+   return
+   exppermAPPLY:
+      Gui expperm: Submit, NoHide
+      Gui expperm: Destroy
+      Gui exp: Default 
+      command:=""
+      if UID||GID||PERM||FCONTEXT {
+         UID:=Trim(UID), GID:=Trim(GID), PERM:=Trim(PERM), FCONTEXT:=Trim(FCONTEXT)
+         for select in selected
+         {
+            LV_GetText(name, select, 1)
+            (A_Index=1) ? command.="("
+            (UID!=""&&GID!="") ? command.="chown " . UID . ":" . GID  " """ . dir . name """ || chown " . UID . "." . GID  " """ . dir . name """; "
+            (PERM!="") ? command.="chmod " . PERM .  " """ . dir . name """; "
+            (FCONTEXT!="") ? command.="chcon -h " . FCONTEXT .  " """ . dir . name """ || chcon " . FCONTEXT .  " """ . dir . name """; "
+         }
+      }
+      if command {
+         command.=") 2>/dev/null"
+         ToolTip, % "Setting permissions for " . selected.Count() . " contents..."
+         write_file("`n(" . command . ") -> (" . adb_shell(command) . ")`n", general_log)
+         SetTimer, RemoveToolTip, -100
+         selected:={}
+      }
+   return
+   explorer_export:
+      if (count:=selected.Count()) {
+         Gui exp: Default 
+         Gui exp: -AlwaysOnTop
+         if open {
+            to:=open
+         } else {
+            FileSelectFolder, to, , , Select the destination folder:
+         }
+         if to {
+            TMP:=""
+            ToolTip, % "Exporting " . count . " contents..."
+            for select in selected
+            {
+               LV_GetText(name, select, 1)
+               if (dir~="^/sdcard") {
+                  command:="pull """ . dir . name """ """ . to . """"
+               } else {
+                  TMP:=ensure_tmp()
+                  if !TMP
+                     return
+                  command:="cp -rf """ . dir . name """ """ . TMP . """"
+                  write_file("`n(" . command . ") -> (" . adb_shell(command) . ")`n", general_log)
+                  command:="pull """ . TMP . "/" . name """ """ . to . """"
+               }
+               write_file("`nADB -> (" . command . ") -> (" . adb_serial(command) . ")`n", general_log)
+               if TMP {
+                  command:="rm -rf """ . TMP . "/" . name """"
+                  write_file("`n(" . command . ") -> (" . adb_shell(command) . ")`n", general_log)
+               }
+            }
+            SetTimer, RemoveToolTip, -100
+            if open {
+               open_dest:=to . "\" . name
+               Run, "%open_dest%"
+            } else {
+               Run, "%to%"
+            }
+            selected:={}
+         }
+      }
+   return
+   expGuiDropFiles:
+   ToolTip, Loading files...
+   TMP:=""
+   if !(from~="^/sdcard") {
+      TMP:=ensure_tmp()
+      if !TMP
+         return
+   }
+   Loop, parse, A_GuiEvent, `n
+   {
+      name:=basename(A_LoopField)
+      ToolTip, % "Sending " . name . "..."
+      command:="push """ . A_LoopField  . """ """ . ((TMP) ? TMP : from) . """"
+      write_file("`nADB -> (" . command . ") -> (" . adb_serial(command) . ")`n", general_log)
+      if TMP {
+         command:="mv -f """ . TMP . "/" . name """ """ . from . """"
+         write_file("`n(" . command . ") -> (" . adb_shell(command) . ")`n", general_log)
+      }
+   }
+   SetTimer, RemoveToolTip, -100
+   goto explorer_load
+   return
+   explorer_load:
+      GuiControl, exp:, current_path, % from
+      ToolTip, % "Loading " . from . " contents..."
+      tree:=[], dir:=SubStr(from,0)="/" ? from : from . "/", selected:={}
+      Loop, parse, % adb_shell("ls -lb """ . dir . """ 2>dev/null"), `n,`r 
+      {
+         if (chr:=SubStr(A_LoopField,1,1)) {
+            if (chr~="^-|l|d|b|c$") && RegExMatch(A_LoopField, (chr="l") ? "(?:(?:(?:\\\s|\S)+)(?=\s+\-\>\s+))|(?:(?:\\\s|\S)+\s*$)" : "(?:\\\s|\S)+\s*$", name) {
+               switch (chr) {
+                  case "d":
+                     icon:=current . "\images\folder.png"
+                  case "l":
+                     icon:=current . "\images\link.png"
+                  default:
+                     icon:=current . "\images\file.png", (chr="-") ? chr:="f"
+               }
+               name:=StrReplace(name, "\"), tree.Push({path:dir . name, dir:from, name:name, type:chr, icon:icon})
+            }
+         }
+      }
+      if !(total:=tree.MaxIndex()) {
+         MsgBox, % 262144 + 4 + 32, HELP, Empty folder: %from%`n`nDo you want to return?
+         IfMsgBox, Yes
+         {
+            if (from="/") {
+               from="/sdcard"
+               goto explorer_load
+            } else {
+               goto explorer_back
+            }
+         }
+      }
+      LV_SetImageList(IconList:=IL_Create(total)), LV_SetImageList(IconList2:=IL_Create(total,,true))
+      SetTimer, RemoveToolTip, -100
+      goto explorer_find
+   return
+   explorer_list:
+      on_action:=ErrorLevel
+      GuiControl, exp:-g, explorer_list
+      If (A_GuiEvent = "DoubleClick") {
+         LV_GetText(type, A_EventInfo, 3)
+         switch (type) {
+            case "d","l":
+               GuiControl, exp: -g, to_find_exp
+               LV_GetText(name, A_EventInfo, 1)
+               from:=dir . name
+               GuiControl, exp:, to_find_exp,
+               gosub explorer_load
+               GuiControl, exp:+gexplorer_find, to_find_exp
+            case "f":
+               open:=current . "\tmp"
+               gosub explorer_export
+               open:=""
+         }
+      } else if (A_GuiEvent = "RightClick") {
+         Menu, MenuExp, Show
+      } else if (A_GuiEvent = "I") {
+         StringCaseSense, On
+         Loop, Parse, on_action
+         {
+            ;Case "F":;Focused Case "f":;Defocused Case "C":;Checked" Case "c":;Unchecked
+            switch (A_LoopField)
+            {
+               case "S": ;Selected
+                  selected[A_EventInfo]:=true
+               Case "s": ;Deselected
+                  (selected[A_EventInfo]) ? selected.RemoveAt(A_EventInfo)
+            }
+         }
+         StringCaseSense, Off
+      }
+      GuiControl, exp:+gexplorer_list, explorer_list
+   return
+   explorer_find:
+      GuiControl, exp:-g -Redraw, explorer_list
+      Gui exp: Default 
+      LV_Delete()
+      Sleep 250
+      GuiControl, exp: -g, to_find_exp
+      Gui exp: Submit, NoHide
+      at_pos:=0, selected:={}
+      for key, file in tree
+      {
+         if (!skip)&&(InStr(file.name, to_find_exp)) {
+            at_pos++
+            IL_Add(IconList, file.icon, 0xFFFFFF, true), LV_Add("Icon" . IL_Add(IconList2, file.icon, 0xFFFFFF, true), file.name, file.dir, file.type)
+         }
+      }
+      LV_ModifyCol(3, "Sort")
+      Loop % LV_GetCount("Column")
+         LV_ModifyCol(A_Index, "AutoHdr")
+      GuiControl, exp:+gexplorer_list +Redraw, explorer_list
+      GuiControl, exp:+gexplorer_find, to_find_exp
+   return
+}
 console(title:="AutoIMG-Console",tool:="",w:=600,h:=300) {
    global mx, my, style, cmdpid, console_command, console_tool, consolehwnd, console_commandhwnd, congui, conFind, confindgui, console_predict
    if tool.MaxIndex() {
@@ -2006,7 +2298,7 @@ console(title:="AutoIMG-Console",tool:="",w:=600,h:=300) {
       }
       GuiControlGet, command, con:, console_command
       words:=""
-      if RegExMatch(command, "^(?:(?:\s*(?:""[^""]+""|\S+)\s+)*)\K(?:(?:""\K[^""]+)|\S+)$", command) {
+      if RegExMatch(command, "^(?:(?:\s*(?:""[^""]+""|\S+)\s+)*)\s*\K(?:(?:""\K[^""]+)|\S+)$", command) {
          len:=StrLen(command)
          Loop, Files, % A_WorkingDir . "\*", FD
          {
@@ -2056,7 +2348,7 @@ console(title:="AutoIMG-Console",tool:="",w:=600,h:=300) {
    confindselect:
       if (A_GuiControlEvent="DoubleClick") {
          Gui confind: Submit, NoHide
-         GuiControl, con:, console_command, % RegExReplace(console_command, "^(?:(?:\s*(?:""[^""]+""|\S+)\s+)*)\K(?:(?:""[^""]+)|\S+)$", """" . confind . """")
+         GuiControl, con:, console_command, % RegExReplace(console_command, "^(?:(?:\s*(?:""[^""]+""|\S+)\s+)*)\s*\K(?:(?:""[^""]+)|\S+)$", """" . confind . """")
          SendMessage, 0xB1, -2, -1,, ahk_id %console_commandhwnd%
          SendMessage, 0xB7,,,, ahk_id %console_commandhwnd%
          Gui confind: Hide
@@ -2078,7 +2370,7 @@ console(title:="AutoIMG-Console",tool:="",w:=600,h:=300) {
    return
 }
 app_manager(list:="") {
-   global mx, my, style, appcontrol, HeaderColors, serial, currentdevice, app_manager, general_log, current, appcontrol_icons, to_find, default_mode_app, default_mode_app_type, total_apps, to_install, to_uninstall
+   global mx, my, style, appcontrol, HeaderColors, serial, currentdevice, app_manager, general_log, current, appcontrol_icons, to_find, appcontrol_findhwnd, default_mode_app, default_mode_app_type, total_apps, to_install, to_uninstall
    StringCaseSense, Off
    if serial && !check_active(serial)
       return 0
@@ -2123,7 +2415,7 @@ app_manager(list:="") {
    Gui app: +AlwaysOnTop
    Gui app: margin, %mx%, %my%
    Gui app: Font, s10, %style%
-   Gui app: Add, Edit, w320 vto_find gappcontrol_find Section,
+   Gui app: Add, Edit, w320 hwndappcontrol_findhwnd vto_find gappcontrol_find Section,
    Gui app: Add, DropDownList, AltSubmit center X+0 YP w100 vdefault_mode_app gappcontrol_find, All apps|Enabled|Disabled|Uninstalled
    Gui app: Add, DropDownList, AltSubmit center X+0 YP w100 vdefault_mode_app_type gappcontrol_find, System-User|System|User
    Gui app: Add, ListView, AltSubmit -ReadOnly hwndappmanager NoSortHdr -LV0x10 LV0x20 Checked gappcontrol vappcontrol XS Y+0 w520 h200, |Name|Package|Path
@@ -2165,6 +2457,7 @@ app_manager(list:="") {
    HHDR := DllCall("SendMessage", "Ptr", appmanager, "UInt", 0x101F, "Ptr", 0, "Ptr", 0, "UPtr") ; LVM_GETHEADER
    HeaderColors[HHDR] := {Txt: 0xFFFFFF, Bkg: 0x797e7f} ; BGR
    SubClassControl(appmanager, "HeaderCustomDraw")
+   SetEditCueBanner(appcontrol_findhwnd, "Search by name or package...")
    Gui app: show, AutoSize Center, App Manager
    WinSet, Redraw, , ahk_id %HHDR%
    Gui app: +LastFound
@@ -2186,8 +2479,9 @@ app_manager(list:="") {
             GuiControl, app:, % guikey, % count + ((app[pkg].state=state[pkg]||(!state[pkg]&&app[pkg].state=-1)) ? -1 : 1)
          }
       }
-   } else if (on_col>1) {
-      If (A_GuiEvent == "DoubleClick" && LV_GetText(copy, A_EventInfo,on_col)) {
+   }
+   if (loaded_icons&&on_col=1)||(on_col>1) {
+      If (A_GuiEvent = "DoubleClick" && LV_GetText(copy, A_EventInfo,on_col)) {
          ToolTip, % "Copied " . copy
          Clipboard := "", Clipboard := copy
          SetTimer, RemoveToolTip, -1000
@@ -2198,11 +2492,10 @@ app_manager(list:="") {
    appcontrol_icons:
    if icons_mode {
       GuiControl, app:, appcontrol_icons, LOAD ICONS
-      icons_mode:=false
    } else {
       GuiControl, app:, appcontrol_icons, GO BACK
-      icons_mode:=true
    }
+   icons_mode:=!icons_mode
    if icons_mode&&!loaded_icons {
       Gui app: Default
       LV_Delete()
@@ -2218,9 +2511,10 @@ app_manager(list:="") {
       {
           app[pkg].icon:=(InStr(FileExist(out:=dest . pkg . ".png"), "A")) ? out : default_icon
       }
+      LV_SetImageList(IconList:=IL_Create(total_apps)), LV_SetImageList(IconList2:=IL_Create(total_apps,,true))
    }
    loaded_icons:=true
-   gosub appcontrol_find
+   goto appcontrol_find
    return
    appcontrol_do:
    gosub appGuiClose
@@ -2269,7 +2563,7 @@ app_manager(list:="") {
    Gui app: +AlwaysOnTop
    return
    appcontrol_find:
-   GuiControl, app:-g, appcontrol
+   GuiControl, app:-g -Redraw, appcontrol
    Gui app: Default 
    LV_Delete()
    Sleep 250
@@ -2277,7 +2571,6 @@ app_manager(list:="") {
    Gui app: Submit, NoHide
    at_pos:=0
    if icons_mode {
-      LV_SetImageList(IconList:=IL_Create(total_apps,,true))
       GuiControl, app:+Icon, appcontrol
    } else {
       GuiControl, app:+Report, appcontrol
@@ -2308,18 +2601,19 @@ app_manager(list:="") {
          }
          if (!skip)&&(InStr(props.name, to_find)||InStr(pkg, to_find)) {
             at_pos++
-            (icons_mode) ? LV_Add("Icon" . IL_Add(IconList, props.icon, 0xFFFFFF, true), props.name, "", pkg) : LV_Add("", "", props.name, pkg, props.path)
+            if loaded_icons
+               IL_Add(IconList, props.icon, 0xFFFFFF, true), LV_Add("Icon" . IL_Add(IconList2, props.icon, 0xFFFFFF, true), props.name, "", pkg, props.path)
+            else
+               LV_Add("", "", props.name, pkg, props.path)
             (with_state>0) ? LV_Modify(at_pos, "Check")
          }
       }
    }
-   LV_ModifyCol(1, "Center")
    if !icons_mode {
       Loop % LV_GetCount("Column")
          LV_ModifyCol(A_Index, "AutoHdr")
    }
-   WinSet, Redraw, , ahk_id %HHDR%
-   GuiControl, app:+gappcontrol, appcontrol
+   GuiControl, app:+gappcontrol +Redraw, appcontrol
    GuiControl, app:+gappcontrol_find, to_find
    Return
 }
@@ -3221,7 +3515,7 @@ check_bin(force := "") {
    return 1
 }
 download(url, to, option:="") {
-   global secure_user_info, general_log, HERE, TOOL, current, adb, fastboot, title
+   global secure_user_info, general_log, HERE, TOOL, current, adb, fastboot
    GetFullPathName(to) ? to := GetFullPathName(to)
    if (to==current "\configs.ini") {
       MsgBox, 262144, Download Service, % " Attempting to replace:`n`n " to "`n`n This action is not allowed for your security"
@@ -4288,12 +4582,15 @@ Gui, Font, s10, Arial Black
 Gui, Add, GroupBox, XS Y+10 h%boxH% w%boxW% c254EC5, Extra Actions
 Gui, Font, s10, %style%
 Gui, Add, Text, XP+10 YP+30 Section, Remove bloatware:
+Gui, Add, Text, XP Y+30, Extract-send files: 
 Gui, Add, Text, XP Y+30, Open the console: 
 Gui, Font, s10, Arial Black
 Gui, Add, Text, XS+130 YS c254EC5, -►
 Gui, Add, Text, XP Y+30 c254EC5, -►
+Gui, Add, Text, XP Y+30 c254EC5, -►
 Gui, Font, s10, %style%
 Gui, Add, Button, center X+5 YS-10 h40 w100 gapp_manager, App Manager
+Gui, Add, Button, center XP Y+10 h40 w100 gfile_manager, File Manager
 Gui, Add, Button, center XP Y+10 h40 w100 guser_console, Console
 Gui, Tab, 3
 Gui, Font, s10, Arial Black
@@ -4385,6 +4682,14 @@ app_manager:
 	    MsgBox, % 262144 + 64, HELP, First find your device
    } else {
        app_manager(file)
+   }
+return
+
+file_manager:
+   if !exist_device {
+	    MsgBox, % 262144 + 64, HELP, First find your device
+   } else {
+       file_manager()
    }
 return
 

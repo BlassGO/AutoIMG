@@ -41,9 +41,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.3.3
+version = 1.3.4
 status = Beta
-build_date = 16.12.2023
+build_date = 10.01.2024
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -78,17 +78,17 @@ ip_check := "((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9
 ; Check dependencies
 Folders := current "," current "\images," tools "," extras
 Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," 7za "," sign "," app_manager "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
-Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png," current "\images\unauthorized.png," current "\images\back.png," current "\images\delete.png," current "\images\export.png," current "\images\file.png," current "\images\folder.png," current "\images\link.png," current "\images\view.png,"
+Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png," current "\images\unauthorized.png," current "\images\back.png," current "\images\delete.png," current "\images\export.png," current "\images\file.png," current "\images\folder.png," current "\images\link.png," current "\images\view.png," current "\images\sideload.png,"
 Loop, parse, Folders, `,
 {
-   If A_LoopField && !InStr(FileExist(A_LoopField), "D") {
+   If A_LoopField && !FileExistFolder(A_LoopField) {
       MsgBox, 262144, WARNING, % "Cant find """ basename(A_LoopField) """ directory"
       ExitApp
    }
 }
 Loop, parse, Files, `,
 {
-   If A_LoopField && !InStr(FileExist(A_LoopField), "A") {
+   If A_LoopField && !FileExistFile(A_LoopField) {
       MsgBox, 262144, WARNING, % "Cant find """ basename(A_LoopField) """ file"
       ExitApp
    }
@@ -351,6 +351,12 @@ CountMatch(str, match) {
 	   _total++, _pos+=_with
     return _total
 }
+FileExistFile(file) {
+   return (FileExist(file)~="[^D]")
+}
+FileExistFolder(folder) {
+   return InStr(FileExist(folder), "D")
+}
 CreateZipFile(sZip) {
    ; Idea by shajul http://www.autohotkey.com/forum/viewtopic.php?t=65401
 	; I just ensure the use of UTF-8-RAW to avoid UTF-8 BOM leading bytes corrupting the ZIP (BlassGO)
@@ -376,7 +382,7 @@ zip(FilesToZip,sZip) {
    ; Idea by shajul http://www.autohotkey.com/forum/viewtopic.php?t=65401
 	; Improved by me (BlassGO)
    global general_log, secure_user_info, HERE, TOOL
-   if InStr(FileExist(sZip), "A") {
+   if FileExistFile(sZip) {
       if (secure_user_info && !(GetFullPathName(sZip) ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
          MsgBox, 262148, Zip preferences, % " Attempting to edit file outside of common paths:`n`n " sZip "`n`n Do you want to allow it?"
          IfMsgBox No
@@ -436,7 +442,7 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 		   RegexMatch(sZip, "i)^(.*?\.zip)\K.*", back_relative)
 		   RegexMatch(sZip, "i)^(.*?\.zip)", sZip)
 		}
-		if InStr(FileExist(sZip), "A") {
+		if FileExistFile(sZip) {
          if (secure_user_info && !(GetFullPathName(sUnz) ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
             MsgBox, 262148, Unzip preferences, % " Attempting to extracting outside of common paths:`n`n " sUnz "`n`n Do you want to allow it?"
             IfMsgBox No
@@ -444,8 +450,8 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
                return 0
             }
          }
-		   if !InStr(FileExist(sUnz), "D")
-              FileCreateDir, % sUnz
+		   if !FileExistFolder(sUnz)
+            FileCreateDir, % sUnz
 		   sZip := GetFullPathName(sZip)
 		   if back_relative
 		      sZip .= back_relative
@@ -492,7 +498,7 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 					} else {
 					   dest := last_path
 					}
-					if !InStr(FileExist(dest), "D")
+					if !FileExistFolder(dest)
 					   FileCreateDir, % dest
 					folder := psh.Namespace(GetFullPathName(dest))
 					if overwrite || !FileExist(dest "\" file.Name) {
@@ -522,7 +528,7 @@ unzip(sZip, sUnz, options := "-o", resolve := false) {
 }
 check_content(options*) {
    global general_log
-   if !InStr(FileExist(path:=GetFullPathName(options.Pop())), "A") {
+   if !FileExistFile(path:=GetFullPathName(options.Pop())) {
       write_file("CANT FIND: " path, general_log)
       return 0
    }
@@ -545,7 +551,7 @@ check_content(options*) {
 }
 FileDeleteZip(options*) {
    global general_log, secure_user_info, HERE, TOOL
-   if !InStr(FileExist(path:=GetFullPathName(options.Pop())), "A") {
+   if !FileExistFile(path:=GetFullPathName(options.Pop())) {
       write_file("CANT FIND: " path, general_log)
       return 0
    }
@@ -589,7 +595,7 @@ FileDeleteZip(options*) {
 }
 FileMoveZip(file,dest,zip) {
    global general_log, secure_user_info, HERE, TOOL
-   if !InStr(FileExist(path:=GetFullPathName(zip)), "A") {
+   if !FileExistFile(path:=GetFullPathName(zip)) {
       write_file("CANT FIND: " path, general_log)
       return 0
    }
@@ -614,7 +620,7 @@ FileMoveZip(file,dest,zip) {
    }
    try {
       if (file:=psh.Namespace(relative_path).ParseName(name)) {
-         if !InStr(FileExist(dest), "D")
+         if !FileExistFolder(dest)
             FileCreateDir, % dest
          relative_to_zip := StrReplace(file.Path, path "\")
          folder:=psh.Namespace(GetFullPathName(dest))
@@ -639,7 +645,7 @@ FileMoveZip(file,dest,zip) {
 extract(file,dest,zip:="") {
    global CONFIG, general_log, secure_user_info, HERE, TOOL
    if CONFIG||zip {
-      if !InStr(FileExist(path:=GetFullPathName(CONFIG ? CONFIG : zip)), "A") {
+      if !FileExistFile(path:=GetFullPathName(CONFIG ? CONFIG : zip)) {
          write_file("CANT FIND: " path, general_log)
          return 0
       }
@@ -655,7 +661,7 @@ extract(file,dest,zip:="") {
       }
       try {
          if (file:=psh.Namespace(relative_path).ParseName(name)) {
-            if !InStr(FileExist(dest), "D")
+            if !FileExistFolder(dest)
                FileCreateDir, % dest
             relative_to_zip := StrReplace(file.Path, path "\")
             folder:=psh.Namespace(GetFullPathName(dest))
@@ -987,13 +993,13 @@ shell(action, noroot := "", noescape := "") {
    return RegExReplace(adb_shell(action, noroot, noescape), "m`a)^\s+|\h+$|\s+(?-m)$")
 }
 check_string(try, str, files := true) {
-	(files&&InStr(FileExist(try), "A")) ? try := read_file(try)
+	(files&&FileExistFile(try)) ? try := read_file(try)
 	return (try ~= str)
 }
 FileCreateDir(options*) {
    global HERE, TOOL, secure_user_info, general_log
    for key,dir in options {
-      GetFullPathName(dir) ? dir := GetFullPathName(dir)
+      dir := GetFullPathName(dir)
       (A_Index=1) ? result:=1
       if (secure_user_info && !(dir ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
          MsgBox, 262148, Write preferences, % " Attempting to create a directory outside of common paths:`n`n " dir "`n`n Do you want to allow it?"
@@ -1002,9 +1008,10 @@ FileCreateDir(options*) {
             return 0
          }
       }
-      if !InStr(FileExist(dir), "D")
+      if !FileExistFolder(dir) {
          FileCreateDir, % dir
-      (!InStr(FileExist(dir), "D")) ? result:=0
+         (!result) ? result:=ErrorLevel
+      }
    }
    return result
 }
@@ -1012,6 +1019,7 @@ FileDelete(options*) {
    global HERE, TOOL, secure_user_info, general_log
    for key,dir in options {
       dir := GetFullPathName(dir)
+      (A_Index=1) ? result:=1
       if (secure_user_info && !(dir ~= "^((\Q" HERE "\E)|(\Q" TOOL "\E))")) {
          MsgBox, 262148, Removal preferences, % " Attempting to delete a file outside of common paths:`n`n " dir "`n`n Do you want to allow it?"
          IfMsgBox No
@@ -1019,13 +1027,15 @@ FileDelete(options*) {
             return 0
          }
       }
-      _type:=FileExist(dir)
-      if InStr(_type, "A")
-         FileDelete, % dir
-      else if InStr(_type, "D")
-         FileRemoveDir, % dir, 1
+      if (_type:=FileExist(dir)) {
+         if InStr(_type, "D")
+            FileRemoveDir, % dir, 1
+         else
+            FileDelete, % dir
+         (!result) ? result:=ErrorLevel
+      }
    }
-   return 1
+   return result
 }
 FileMove(orig,dir) {
    global HERE, TOOL, secure_user_info, general_log
@@ -1081,7 +1091,7 @@ write_file(content, file, enc := "UTF-8") {
 	  }
    }
    try {
-     if !InStr(FileExist(dest:=dirname(file)), "D")
+     if !FileExistFolder(dest:=dirname(file))
         FileCreateDir, % dest
      FileAppend, % content, % file, % enc
 	  return 1
@@ -1580,7 +1590,7 @@ optimize() {
    }
    return 1
 }
-find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
+find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "", optimize:=true) {
    global exist_device, device_mode, device_connection, remember_mode, currentdevice, devices, serial, current, cache
    global wireless_IP, wireless_PORT, hidden_devices, wireless_FORCE
    global style, adb, mx, my, general_log, HeaderColors, ip_check
@@ -1812,7 +1822,7 @@ find_device(attemps := 1, show_msg := "", show_box := "", show_panel := "") {
    if exist_device {
       if (device_mode="fastboot")
          get_bootloader_env()
-      else {
+      else if optimize && (device_mode!="sideload") {
          print(">> Optimizing: Please wait...")
          optimize()
          print(">> Optimizing: Done")
@@ -2134,7 +2144,7 @@ file_manager(from:="/sdcard") {
          IfMsgBox, Yes
          {
             if (from="/") {
-               from="/sdcard"
+               from:="/sdcard"
                goto explorer_load
             } else {
                goto explorer_back
@@ -2209,7 +2219,7 @@ console(title:="AutoIMG-Console",tool:="",w:=600,h:=300) {
    if tool.MaxIndex() {
       for cont, file in tool
       {
-         if InStr(FileExist(file), "A") {
+         if FileExistFile(file) {
             (list) ? list.="|"
             list.=basename(file)
          } else {
@@ -2377,7 +2387,7 @@ app_manager(list:="") {
    Print(">> Manager: " . currentdevice.name)
    if !push(app_manager,"/data/local/tmp")
       return 0
-   if list&&InStr(FileExist(list), "A") {
+   if list&&FileExistFile(list) {
       Print(">> Manager: Loading list...")
       if (SubStr(ObjHeader(list),0)="A") {
          state:=ObjLoad(list)
@@ -2509,7 +2519,7 @@ app_manager(list:="") {
       dest.="\app_manager_icons\", default_icon:=current . "\images\app.png"
       for pkg, props in app
       {
-          app[pkg].icon:=(InStr(FileExist(out:=dest . pkg . ".png"), "A")) ? out : default_icon
+          app[pkg].icon:=(FileExistFile(out:=dest . pkg . ".png")) ? out : default_icon
       }
       LV_SetImageList(IconList:=IL_Create(total_apps)), LV_SetImageList(IconList2:=IL_Create(total_apps,,true))
    }
@@ -2618,12 +2628,12 @@ app_manager(list:="") {
    Return
 }
 install_manager(data:="") {
-   global mx, my, style, installcontrol, install_files, all_formats, current, HeaderColors, formats, unexpected
+   global mx, my, style, installcontrol, install_files, all_formats, current, HeaderColors, formats, unexpected, installmanagerexport, manager
    Gui, 1:Submit, NoHide
    GuiControlGet, part, 1:, partition
    IniRead, zip_msg, % current "\configs.ini", GENERAL, zip_msg, 0
    if (part && part!="None") && (install_files[install_files.MaxIndex()].part!=part) {
-      install_files[install_files.MaxIndex()].part := part
+      install(,part,, install_files.MaxIndex())
    }
    ext:=""
    if (all_formats=1) {
@@ -2639,7 +2649,7 @@ install_manager(data:="") {
       }
    }
    (!ext) ? ext := "*.img;*.zip;*.apk;*.cpio"
-   if data&&InStr(FileExist(data), "A") {
+   if data&&FileExistFile(data) {
       Print(">> Manager: Loading list...")
       if (SubStr(ObjHeader(data),0)="I") {
          install_files:=ObjLoad(data)
@@ -2653,16 +2663,16 @@ install_manager(data:="") {
    }
    Gui 3: Destroy
    Gui 3: Default 
-   Gui 3: +AlwaysOnTop
+   Gui 3: +AlwaysOnTop +Resize
    Gui 3: margin, %mx%, %my%
    Gui 3: Font, s10, %style%
    Gui 3: Add, ListView, AltSubmit -ReadOnly hwndmanager NoSortHdr -LV0x10 LV0x20 Checked vinstallcontrol Y+0 w320 h200, |Partition|File to install
-   Gui 3: Add, Button, Center Y+0 w320 ginstallcontrol_export, EXPORT
+   Gui 3: Add, Button, Center Y+0 w320 ginstallcontrol_export vinstallmanagerexport, EXPORT
    LV_Delete()
    list := New LV_InCellEdit(manager)
    list.SetColumns(2)
    for index, file in install_files {
-      if data && !InStr(FileExist(file.file), "A") {
+      if data && !FileExistFile(file.file) {
          MsgBox, % 262144 + 48 + 1, Request, % file.file "`n`nThis file is intended for the partition """ file.part """ but it DOES NOT EXIST!"
          ifMsgBox OK
          {
@@ -2700,11 +2710,9 @@ install_manager(data:="") {
        For I, O In list.Changed
          Row .= O.Row, Column .= O.Col, New .= O.Txt
 		 if New {
-          install_files[Row].part := New
-          if (New="UPDATE FILE")
-             install_files[Row].is_zip := false
+          install(,New,, Row)
 		    if (install_files.MaxIndex()=Row)
-		       GuiControl, 1:, partition, % New
+		       GuiControl, 1:Text, partition, % New
           list.Remove("Changed")
 		    LV_ModifyCol(2, "AutoHdr")
        } else {
@@ -2728,29 +2736,31 @@ install_manager(data:="") {
 	      Gui 3: -AlwaysOnTop
          FileSelectFile, file, 1,, Please select some IMG to Install, (%ext%)
          if file {
-            install_files[A_EventInfo].file := file
-            LV_Modify(A_EventInfo, "Col3", file)
-            LV_ModifyCol(3, "AutoHdr")
             ext_file:=extname(file)
-            if !(install_files[A_EventInfo].part="UPDATE FILE") && (ext_file="zip" || ext_file="apk") {
-               install_files[A_EventInfo].is_zip:=true
-               install_files[A_EventInfo].part:="ZIP FILE"
-               LV_Modify(A_EventInfo, "Col2", "ZIP FILE")
-               LV_ModifyCol(2, "AutoHdr")
-               if (install_files.MaxIndex()=A_EventInfo)
-                  GuiControl, 1:, partition, ZIP FILE
-               if (zip_msg!=1) {
-                  help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
-                  IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
+            if (ext_file="zip"||ext_file="apk") {
+               if (ext_file="zip") && check_content("META-INF\com\android\metadata",file) {
+                  New:="SIDELOAD FILE"
+               } else if (ext="zip") && !check_content("META-INF",file) {
+                  New:="UPDATE FILE"
+               } else {
+                  New:="ZIP FILE"
+                  if (zip_msg!=1) {
+                     help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
+                     IniWrite, 1, % current "\configs.ini", GENERAL, zip_msg
+                  }
                }
             } else if (ext_file="cpio") {
-               install_files[A_EventInfo].is_ramdisk:=true
-               install_files[A_EventInfo].part:="RAMDISK FILE"
-               LV_Modify(A_EventInfo, "Col2", "RAMDISK FILE")
-               LV_ModifyCol(2, "AutoHdr")
-               if (install_files.MaxIndex()=A_EventInfo)
-                  GuiControl, 1:, partition, RAMDISK FILE
+               New:="RAMDISK FILE"
+            } else {
+               New:=simplename(file)
             }
+            install(file,New,, A_EventInfo)
+            LV_Modify(A_EventInfo, "Col2", New)
+            LV_ModifyCol(2, "AutoHdr")
+            LV_Modify(A_EventInfo, "Col3", file)
+            LV_ModifyCol(3, "AutoHdr")
+            if (install_files.MaxIndex()=A_EventInfo)
+               GuiControl, 1:Text, partition, % New
 	     }
 		  Gui 3: +AlwaysOnTop
 	  }
@@ -2767,6 +2777,11 @@ install_manager(data:="") {
    }
    Gui 3: +AlwaysOnTop
    return
+   3GuiSize:
+      if (A_EventInfo = 1)
+         return
+      AutoXYWH("wh", manager), AutoXYWH("yw", "installmanagerexport")
+   return
 }
 xiaomeme_test(img) {
    global current_anti
@@ -2777,10 +2792,10 @@ xiaomeme_test(img) {
       return 1
    path := dirname(img)
    name := basename(img)
-   if FileExist(path "\anti_version.txt") {
+   if FileExistFile(path "\anti_version.txt") {
       xiaomeme := true
 	  anti := read_file(path "\anti_version.txt")
-   } else If FileExist(path "\flash_all.bat") {
+   } else If FileExistFile(path "\flash_all.bat") {
       xiaomeme := true
 	  anti := RegExReplace(read_file(path "\flash_all.bat"), ".*CURRENT_ANTI_VER=([0-9]+).*", "$1", result)
 	  if !result
@@ -2874,11 +2889,7 @@ install_img(img, part, extra := "", extra2 := "") {
    return 1
 }
 ensure_fastboot() { 
-   global device_mode
-   global remember_mode
-   global serial
-   global default_mode
-   global general_log
+   global device_mode, remember_mode, serial, default_mode, general_log
    Gui, 1:Submit, NoHide
    if (serial && !check_active(serial))
       return 0
@@ -2901,6 +2912,24 @@ ensure_fastboot() {
       print(">> Oops! Cant reboot in fastboot")
 	   MsgBox, % 262144 + 16, ERROR, Cant reboot in fastboot
       return 0
+   }
+}
+ensure_sideload() {
+   global exist_device, device_mode, remember_mode, general_log, serial, current
+   while (device_mode!="sideload")
+   {
+      if (A_Index=1) {
+         if (device_mode!="recovery") {
+            gosub reboot_recovery
+            print(">> Waiting for Recovery Mode")
+            while (device_mode!="recovery") {
+               (!(serial&&check_active(serial))) ? find_device(1)
+            }
+         }
+         help(current "\images\sideload.png", "Please start Sideload mode manually")
+         print(">> Waiting for Sideload Mode")
+      }
+      find_device(1,,,, false)
    }
 }
 update_drivers() {
@@ -3253,13 +3282,34 @@ ensure_tmp(needexec := ""){
    write_file(result, general_log)
    return TMP
 }
+flash_sideload_zip(zip) {
+   global exist_device, device_mode, general_log, serial
+   if (serial && !check_active(serial))
+      return 0
+   if !exist_device
+      return 0
+   if !FileExistFile(zip) {
+      MsgBox, % 262144 + 16, ERROR, % "Cant find """ zip """"
+      return 0
+   }
+   ensure_sideload()
+   print(">> Installing " """" basename(zip) """")
+   print(">> Please wait...")
+   result:=adb_serial("sideload """ zip """")
+   write_file(result, general_log)
+   if (result ~= "i)error|failed") {
+	   MsgBox, % 262144 + 16, ERROR, % result
+	   return 0
+   }
+   return 1
+}
 flash_zip(zip) {
    global exist_device, device_mode, general_log, ensure_recovery, serial, busybox_work
    if (serial && !check_active(serial))
       return 0
    if !exist_device
       return 0
-   if (ensure_recovery=1 && device_mode!="recovery")||(device_mode="fastboot") {
+   if (ensure_recovery=1 && device_mode!="recovery")||(device_mode~="fastboot|sideload") {
       gosub reboot_recovery
 	   adb_shell("setprop sys.usb.config mtp,adb; setprop sys.usb.ffs.mtp.ready 1")
       ensure_shell()
@@ -3672,14 +3722,14 @@ download(url, to, option:="") {
                Process, Close, % basename(adb)
                Process, Close, % basename(fastboot)
                FileDelete, % current "\update.exe"
-               if InStr(FileExist(current "\update.exe"), "A") {
+               if FileExistFile(current "\update.exe") {
 				      anomaly:=true
                } else {
                   Loop, parse, % read_xml("https://raw.githubusercontent.com/BlassGO/auto_img_request/main/bin_tree.txt",, true), `n,`r 
                   {
-                      if InStr(FileExist(current "\" A_LoopField), "D") {
+                      if FileExistFolder(current "\" A_LoopField) {
                          FileRemoveDir, % current "\" A_LoopField, 1
-                         if InStr(FileExist(current "\" A_LoopField), "D") {
+                         if FileExistFolder(current "\" A_LoopField) {
                              MsgBox, % 262144 + 16, ERROR, % "Busy folder:`n`n" current "\" A_LoopField
                              result:=0
 					              return
@@ -3688,7 +3738,7 @@ download(url, to, option:="") {
                   }
                   if unzip(to "\bin", current, "force inside-zip") && unzip(to, current, "files force regex: ^[^\\]+\.exe$") {
                      FileMove, % current "\*.exe", % current "\update.exe"
-                     if InStr(FileExist(current "\update.exe"), "A") {
+                     if FileExistFile(current "\update.exe") {
                         update:=true, updating_script:=updating_script_zip
                      } else {
                         anomaly:=true
@@ -3726,7 +3776,7 @@ boot(img) {
       return 0
    if !ensure_fastboot()
 	  return 0
-   if !FileExist(img) {
+   if !FileExistFile(img) {
       unexpected := "Cant find " img
       return 0
    }
@@ -4418,7 +4468,7 @@ move(key, to) {
    return 1
 }
 getsaved(file) {
-   if FileExist(file) {
+   if FileExistFile(file) {
 	  if RegexMatch(read_file(file), "is)(\[CUSTOM\]\K.*?)(?=(\R$)|\[)", section) {
 		 Loop, parse, section, `n, `r
 		 {
@@ -4460,18 +4510,27 @@ create(part, with) {
 	}
 	return 1
 }
-install(file, in, with:="") {
+install(file:="", in:="", with:="", on:="") {
    global install_files
    (!IsObject(install_files)) ? install_files:=[]
-   if !InStr(FileExist(file), "A") {
-      unexpected := "Cant find file: " file
-	   return 0
-	}
+   if !(on&&!file) {
+      if !FileExistFile(file) {
+         unexpected := "Cant find file: " file
+         return 0
+      }
+   }
    in:=Trim(in)
    (in="ZIP FILE") ? is_zip:=true
+   (in="SIDELOAD FILE") ? is_sdl_zip:=true
    (in="RAMDISK FILE") ? is_ramdisk:=true
 	try {
-      install_files.Push({file:file, part:in, extra:Trim(with), is_zip:is_zip, is_ramdisk:is_ramdisk, install:true})
+      if on {
+         (file) ? install_files[on].file:=file
+         (in) ? install_files[on].part:=in
+         (is_zip||is_ramdisk||is_sdl_zip) ? (install_files[on].is_zip:=is_zip, install_files[on].is_ramdisk:=is_ramdisk, install_files[on].is_sdl_zip:=is_sdl_zip)
+      } else {
+         install_files.Push({file:file, part:in, extra:Trim(with), is_zip:is_zip, is_ramdisk:is_ramdisk, is_sdl_zip:is_sdl_zip, install:true})
+      }
 	} catch {
       unexpected := "Cant append file: " file
       return 0
@@ -4494,7 +4553,7 @@ wipe_env(reset := false) {
    enable_bar()
    disable_bar()
    if reset {
-     GuiControl, 1:, partition, None
+     GuiControl, 1:Text, partition, None
      GuiControl, 1:, reboot, 0
 	  GuiControl, 1:, format_data, 0
 	  GuiControl, 1:, disable_verify, 0
@@ -4509,7 +4568,7 @@ wipe_env(reset := false) {
 }
 read_config(file) {
    global secure_user_info, current, anti_notspam, CONFIG
-   if !InStr(FileExist(file), "A") {
+   if !FileExistFile(file) {
       MsgBox, % 262144 + 16, ERROR, % "Cant find file: " file
 	  return 0
    }
@@ -4563,7 +4622,7 @@ If !ImageButton.Create(clean, Opt1, Opt2) {
    return
 }
 Gui, Add, Text, XS Y+10, Destination Partition: 
-Gui, Add, Edit, center X+20 YP h20 w100 vpartition, None
+Gui, Add, ComboBox, center X+20 YP w100 vpartition, ZIP FILE|UPDATE FILE|SIDELOAD FILE|RAMDISK FILE
 Gui, Add, Edit, x%mx% Y+15 h135 w%boxW% vconsole hwndgeneralbox 0x200 border HScroll ReadOnly, >> Start Tool: %start_date% in W%winver%`r`n
 Gui, Add, Progress, R0-100 XP Y+0 h60 w130 -Smooth 0x200 BackgroundC9C9C9 c3d484a vinstall_bar Section, 0
 Gui, Add, Button, center XP YP h60 w130 0x200 border ginstall vinstall, INSTALL
@@ -4652,6 +4711,7 @@ Gui, Add, Text, XP Y+10, %build_author%/%build_date%
 Gui, Add, Picture, XS+20 Y+2 h80 w190 gdonate, % current "\images\support.png"
 toolid := WinExist()
 Gui, Show, w%weight% h%height%, %title%_%original_author%
+GuiControl, 1:Text, partition, None
 WinGetPos, toolX, toolY, toolW, toolH, ahk_id %toolid%
 OnMessage(WM_LBUTTONDOWN := 0x201, "eventHandler")
 OnMessage(WM_LBUTTONUP := 0x202, "eventHandler")
@@ -4842,7 +4902,7 @@ select:
    }
 	(!ext) ? ext := "*.img;*.config;*.zip;*.apk;*.cpio;*.aid"
 	if (part && part!="None") && (install_files[install_files.MaxIndex()].part!=part) {
-      install_files[install_files.MaxIndex()].part := part
+      install(,part,, install_files.MaxIndex())
    }
 	FileSelectFile, file, 1,, Please select some IMG to Install, (%ext%)
 	if !file {
@@ -4853,9 +4913,17 @@ select:
        if (ext="zip") && check_content("on_install.config",file) {
           print(">> Loaded Config: " + basename(file))
           on_install(file,true)
+       } else if (ext="zip") && check_content("META-INF\com\android\metadata",file) {
+          print(">> Loaded ZIP - Sideload: " + basename(file))
+          GuiControl, 1:Text, partition, SIDELOAD FILE
+          install(file, "SIDELOAD FILE")
+       } else if (ext="zip") && !check_content("META-INF",file) {
+          print(">> Loaded ZIP - Fastboot: " + basename(file))
+          GuiControl, 1:Text, partition, UPDATE FILE
+          install(file, "UPDATE FILE")
        } else {
          print(">> Loaded ZIP: " + basename(file))
-         GuiControl, 1:, partition, ZIP FILE
+         GuiControl, 1:Text, partition, ZIP FILE
          install(file, "ZIP FILE")
          if (zip_msg!=1) {
             help(current "\images\recoverys.png", "The installation of ZIPs requires a Custom Recovery (Or device Booted + Root), so`nAll loaded ZIPs will be installed after the IMGs and not in load order")
@@ -4867,7 +4935,7 @@ select:
 		 read_config(file)
      } else if (ext="cpio") {
        print(">> Loaded RAMDISK: " + basename(file))
-		 GuiControl, 1:, partition, RAMDISK FILE
+		 GuiControl, 1:Text, partition, RAMDISK FILE
 		 install(file, "RAMDISK FILE")
      } else if (ext="aid") {
        switch (SubStr(ObjHeader(file),0))
@@ -4879,7 +4947,7 @@ select:
        }
 	  } else {
 		 print(">> Loaded: " + basename(file))
-		 GuiControl, 1:, partition, % simplename(file)
+		 GuiControl, 1:Text, partition, % simplename(file)
 		 install(file, simplename(file))
 	  }
      file:=""
@@ -4956,17 +5024,20 @@ install:
 	  return
 	}
 	if (part && part!="None") && (install_files[install_files.MaxIndex()].part!=part) {
-	   install_files[install_files.MaxIndex()].part := part
+	   install(,part,, install_files.MaxIndex())
 	}
 	to_install=0
    to_install_zip=0
    to_install_ramdisk=0
+   to_install_sdl_zip=0
    for index, file in install_files {
       if file.install {
          if file.is_zip {
             to_install_zip++
          } else if file.is_ramdisk {
             to_install_ramdisk++
+         } else if file.is_sdl_zip {
+            to_install_sdl_zip++
          } else {
 			   to_install++
          }
@@ -5008,12 +5079,12 @@ install:
          }
       }
    }
-	if !(to_install||to_install_zip||to_install_ramdisk||to_remove||to_create) && (format_data!=1) {
+	if !(to_install||to_install_zip||to_install_ramdisk||to_install_sdl_zip||to_remove||to_create) && (format_data!=1) {
 	  MsgBox, % 262144 + 64, HELP, Please enable at least one action/installation
 	  return
    } else if !to_install && to_install_ramdisk {
       goto ramdisk_install
-   } else if !to_install && to_install_zip {
+   } else if !to_install && (to_install_zip||to_install_sdl_zip) {
 	  goto recovery_install
    }
 
@@ -5022,8 +5093,12 @@ fastboot_install:
 	   return
 	fastbootd ? print(">> Mode: fastbootd") : print(">> Mode: fastboot")
 	if !unlocked {
-	  MsgBox, 262144, WARNING, You need to unlock your bootloader for security
-	  return
+	  MsgBox, % 262144 + 64 + 4, WARNING, Custom software installations require the Bootloader UNLOCKED or you will damage your device!`n`nAre you completely sure that you are going to install official software?
+     IfMsgBox, No
+     {
+         print(">> Aborted: Protecting your device^^")
+         return
+     }
 	}
 	if to_remove {
       progress := Round(100/to_remove)
@@ -5162,6 +5237,31 @@ ramdisk_install:
 recovery_install:
    disable_bar()
    if !install_fail {
+      if to_install_sdl_zip {
+         ensure_sideload()
+	      print(">> Mode: Sideload")
+         FD_CURRENT ? load_config("section ""before_sideload_zip""",,, FD_CURRENT)
+         print(">> Loading Sideload installation")
+         enable_bar()
+         progress := Round(100/to_install_sdl_zip)
+         for index, file in install_files {
+            if file.install&&file.is_sdl_zip {
+               if flash_sideload_zip(file.file) {
+                  add_progress(progress)
+                  find_device(3)
+               } else {
+                  install_fail := true
+                  break
+               }
+            }
+         }
+         disable_bar()
+         if install_fail {
+            print(">> Aborted Sideload Installation!")
+            return
+         }
+         FD_CURRENT ? load_config("section ""after_sideload_zip""",,, FD_CURRENT)
+	   }
       if to_install_zip {
          FD_CURRENT ? load_config("section ""before_zip""",,, FD_CURRENT)
          print(">> Loading ZIP installation")

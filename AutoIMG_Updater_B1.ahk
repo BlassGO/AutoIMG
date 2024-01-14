@@ -16,6 +16,8 @@ SetBatchLines -1
 #include obj_dump.ahk
 #include crypt.ahk
 #include gui_resize.ahk
+#include json.ahk
+#include gdip.ahk
 
 ; AHK2 configs
 ;@Ahk2Exe-SetName         AutoIMG
@@ -41,9 +43,9 @@ if not A_IsAdmin {
 }
    
 ; Info
-version = 1.3.4
+version = 1.4.0
 status = Beta
-build_date = 10.01.2024
+build_date = 14.01.2024
 
 ; In case you are going to compile your own version of this Tool put your name here
 maintainer_build_author = @BlassGO
@@ -78,7 +80,7 @@ ip_check := "((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9
 ; Check dependencies
 Folders := current "," current "\images," tools "," extras
 Files := fastboot "," adb "," busybox "," dummy_img "," apktool "," zipalign "," 7za "," sign "," app_manager "," tools "\AdbWinApi.dll," tools "\AdbWinUsbApi.dll,"
-Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png," current "\images\unauthorized.png," current "\images\back.png," current "\images\delete.png," current "\images\export.png," current "\images\file.png," current "\images\folder.png," current "\images\link.png," current "\images\view.png," current "\images\sideload.png,"
+Files .= current "\images\dev_options.png," current "\images\clean.jpg," current "\images\clean2.jpg," current "\images\support.png," current "\images\usb.png," current "\images\turn_on.png," current "\images\recoverys.png," current "\images\dev_wir.png," current "\images\app.png," current "\images\app_guide.png," current "\images\unauthorized.png," current "\images\back.png," current "\images\delete.png," current "\images\export.png," current "\images\file.png," current "\images\folder.png," current "\images\link.png," current "\images\view.png," current "\images\sideload.png," current "\images\reload.png,"
 Loop, parse, Folders, `,
 {
    If A_LoopField && !FileExistFolder(A_LoopField) {
@@ -1928,6 +1930,190 @@ to_bytes(size) {
       return
    }
 }
+modules() {
+   global mx, my, style, current, general_log, HeaderColors, moduleshwnd, to_find_modules, modules_list, modules_view, modules_delete, modules_reload
+   modules:={}
+   Loop, Files, % current . "\modules\*.json", F
+   {
+      id:=simplename(A_LoopFileName), content:=json_load(read_file(A_LoopFileFullPath))
+      modules[id]:=content, modules[id].id:=id, modules[id].image:=LoadPicture(A_LoopFileDir . "\" . id . ".png"), modules[id].currentver:=content.version
+   }
+   Gui modules: New 
+   Gui modules: Default 
+   Gui modules: +AlwaysOnTop +Resize +Hwndmoduleshwnd
+   Gui modules: margin, %mx%, %my%
+   Gui modules: Font, s10, %style%
+   Gui modules: Add, Edit, w440 hwndmodules_findhwnd vto_find_modules gmodules_find Section,
+   Gui modules: Add, Picture, center X+0 YP w30 h30 vmodules_reload gmodules_web, % current . "\images\reload.png"
+   Gui modules: Add, Picture, center X+0 YP w30 h30 vmodules_view gmodules_view, % current . "\images\view.png"
+   Gui modules: Add, Picture, center X+0 YP w30 h30 vmodules_delete gmodules_delete, % current . "\images\delete.png"
+   Gui modules: Add, ListView, AltSubmit +Multi -ReadOnly hwndmoduleslisthwnd NoSortHdr Sort -LV0x10 LV0x20 gmodules_list vmodules_list XS Y+0 w520 h200, Name|Version|Author|Installed|Description|ID
+   Gui modules: show, AutoSize Center, AutoIMG-Modules
+   Gui modules: +LastFound
+   SetEditCueBanner(modules_findhwnd, "Search by name...")
+   HHDR := DllCall("SendMessage", "Ptr", moduleslisthwnd, "UInt", 0x101F, "Ptr", 0, "Ptr", 0, "UPtr") ; LVM_GETHEADER
+   HeaderColors[HHDR] := {Txt: 0xFFFFFF, Bkg: 0x797e7f} ; BGR
+   SubClassControl(moduleslisthwnd, "HeaderCustomDraw")
+   SetEditCueBanner(appcontrol_findhwnd, "Search by name or package...")
+   WinSet, Redraw, , ahk_id %HHDR%
+   if !id {
+      gosub modules_web
+   }
+   if (total:=modules.Count()) {
+      if (at_pos="")
+         gosub modules_find
+   } else {
+      LV_Add("", "NOTHING at the moment..."), LV_ModifyCol(1, "AutoHdr")
+   } 
+   WinWaitClose
+   return
+   modulesGuiClose:
+      Gui modules: Destroy
+   return
+   modulesGuiSize:
+      if (A_EventInfo = 1)
+         return
+      AutoXYWH("w", "to_find_modules"), AutoXYWH("x", "modules_reload", "modules_view", "modules_delete"), AutoXYWH("wh", "modules_list")
+   return
+   modules_view:
+      if list_mode {
+         GuiControl, modules:+Report, modules_list
+      } else {
+         GuiControl, modules:+Icon, modules_list
+      }
+      list_mode:=!list_mode
+   return
+   modules_delete:
+      Gui modules: Default 
+      gosub module_refresh
+      id:=false
+      for select in selected
+      {
+         LV_GetText(id, select, 6)
+         if modules[id].currentver {
+            ToolTip, Removing module: %id%...
+            FileDelete, % current . "\modules\" . id . ".*"
+            modules[id].currentver:=""
+            SetTimer, RemoveToolTip, -100
+         }
+      }
+      if id {
+         gosub modules_find
+      }
+   return
+   module_refresh:
+      row:=0, selected:={}
+      while (row:=LV_GetNext(row)) {
+         selected[row]:=true
+      }
+   return
+   modules_web:
+      Gui modules: Default 
+      LV_Delete(), LV_SetImageList({})
+      LV_Add("", "Loading modules from the WEB...")
+      LV_Add("", "Please wait..."), LV_ModifyCol(1, "AutoHdr")
+      Loop, parse, % read_xml("https://raw.githubusercontent.com/BlassGO/auto_img_request/main/modules.txt"), `n,`r 
+      {
+         RegexMatch(A_LoopField, "i)^\s*json:\s*\K.*", url) ? json:=true : (url:=A_LoopField, json:=false)
+         if url&&(content:=read_xml(url)) {
+            if json {
+               try {
+                  content:=json_load(content)
+                  if (content.id) {
+                     (content.image) ? content.image:=GetHBitmapFromImageURL(content.image)
+                  } else {
+                     write_file("`nDirect reference to JSON require an ID: " . url . "`n", general_log)
+                     content:=""
+                  }
+               } catch {
+                  write_file("`nInvalid module JSON: " . url . "`n", general_log)
+                  continue
+               }
+               (content.id) ? (currentver:=modules[content.id].currentver, modules[content.id]:=content, modules[content.id].currentver:=currentver)
+            } else {
+               for count, module in json_load(content)
+               {
+                  if (module.type="file"&&extname(module.name)="json")  {
+                     try {
+                        content:=json_load(read_xml(module.download_url)), (!content.id) ? content.id:=simplename(module.name)
+                        (content.image) ? content.image:=GetHBitmapFromImageURL(content.image)
+                     } catch {
+                        write_file("`nInvalid module JSON: " . module.download_url . "`n", general_log)
+                        continue
+                     }
+                  }
+                  (content.id) ? (currentver:=modules[content.id].currentver, modules[content.id]:=content, modules[content.id].currentver:=currentver)
+               }
+            }
+         }
+      }
+      gosub modules_find
+   return
+   modules_list:
+      on_action:=ErrorLevel
+      GuiControl, modules:-g, modules_list
+      If (A_GuiEvent = "DoubleClick") && LV_GetText(id, A_EventInfo, 6) {
+         module:=current . "\modules\" . id . ".zip", download:=true
+         if modules[id].currentver {
+            if (modules[id].currentver!=modules[id].version) {
+               MsgBox, % 262144 + 4 + 32, UPDATE, % (modules[id].changelog) ? modules[id].changelog : "Updates available!`n`nDo you want to download them?"
+               IfMsgBox, No
+                  download:=false
+            } else {
+               download:=false
+            }
+            if !download {
+               Gui modules: Destroy
+               if !on_install(module) {
+                  print(">> Module execution has stopped!")
+               }
+               return
+            }
+         }
+         if download {
+            Gui modules: -AlwaysOnTop
+            Gui 1: +AlwaysOnTop
+            success:=false
+            if Download(modules[id].url, module, modules[id].hashtype . " " . modules[id].hash) {
+               module:=current . "\modules\" . id
+               FileDelete, % module . ".json"
+               write_file(BuildJson(modules[id]), module . ".json")
+               SavePicture(modules[id].image, module . ".png")
+               modules[id].currentver:=modules[id].version
+               gosub modules_find
+               success:=true
+            }
+            Gui 1: -AlwaysOnTop
+            Gui modules: +AlwaysOnTop
+            if success
+               MsgBox, % 262144, % modules[id].name, You can use it now!
+         }
+      }
+      GuiControl, modules:+gmodules_list, modules_list
+   return
+   modules_find:
+      GuiControl, modules:-g -Redraw, modules_list
+      Gui modules: Default 
+      LV_Delete()
+      Sleep 250
+      GuiControl, modules: -g, to_find_modules
+      Gui modules: Submit, NoHide
+      LV_SetImageList(IconList:=IL_Create(total)), LV_SetImageList(IconList2:=IL_Create(total,,true))
+      at_pos:=0
+      for key, module in modules
+      {
+         if (InStr(module.name, to_find_modules)) {
+            at_pos++
+            IL_Add(IconList, "HBITMAP:*" . module.image, 0xFFFFFF, true), LV_Add("Icon" . IL_Add(IconList2, "HBITMAP:*" . module.image, 0xFFFFFF, true), module.name, module.version, module.author, (module.currentver)?module.currentver:"---", module.description, module.ID)
+         }
+      }
+      LV_ModifyCol(4, "SortDesc")
+      Loop % LV_GetCount("Column")
+         LV_ModifyCol(A_Index, "AutoHdr")
+      GuiControl, modules:+gmodules_list +Redraw, modules_list
+      GuiControl, modules:+gmodules_find, to_find_modules
+   return
+}
 file_manager(from:="/sdcard") {
    global mx, my, style, explorer_list, to_find_exp, explorer_findhwnd, explorer, explorer_back, explorer_view, explorer_delete, explorer_export, current, guiexplorer, general_log, current_path, cache, exppermUID, exppermGID, exppermPERM, exppermCONTEXT, UID, GID, PERM, FCONTEXT
    if !IsObject(cache)
@@ -1961,10 +2147,18 @@ file_manager(from:="/sdcard") {
    SetEditCueBanner(explorer_findhwnd, "Search by name...")
    ControlFocus, current_path, ahk_class AutoHotkeyGUI 
    WinWaitClose
-   return tree
+   return selectedout
    expGuiClose:
+      Gui exp: Default
+      gosub explorer_refresh
+      for select in selected
+      {
+         LV_GetText(name, select, 1)
+         (A_Index=1) ? selectedout:=[]
+         selectedout.Push(dir . name)
+      }
       Gui exp: Destroy
-      return
+   return
    expGuiSize:
       if (A_EventInfo = 1)
          return
@@ -1990,9 +2184,16 @@ file_manager(from:="/sdcard") {
       }
       list_mode:=!list_mode
    return
+   explorer_refresh:
+      row:=0, selected:={}
+      while (row:=LV_GetNext(row)) {
+         selected[row]:=true
+      }
+   return
    explorer_delete:
       Gui exp: Default 
       command:=""
+      gosub explorer_refresh
       for select in selected
       {
          LV_GetText(name, select, 1)
@@ -2009,6 +2210,7 @@ file_manager(from:="/sdcard") {
    return
    explorer_permissions:
       Gui exp: Default 
+      gosub explorer_refresh
       if selected.Count() {
          Gui exp: -AlwaysOnTop
          Gui expperm: New 
@@ -2035,6 +2237,7 @@ file_manager(from:="/sdcard") {
       Gui expperm: Submit, NoHide
       Gui expperm: Destroy
       Gui exp: Default 
+      gosub explorer_refresh
       command:=""
       if UID||GID||PERM||FCONTEXT {
          UID:=Trim(UID), GID:=Trim(GID), PERM:=Trim(PERM), FCONTEXT:=Trim(FCONTEXT)
@@ -2052,10 +2255,11 @@ file_manager(from:="/sdcard") {
          ToolTip, % "Setting permissions for " . selected.Count() . " contents..."
          write_file("`n(" . command . ") -> (" . adb_shell(command) . ")`n", general_log)
          SetTimer, RemoveToolTip, -100
-         selected:={}
       }
    return
    explorer_export:
+      Gui exp: Default 
+      gosub explorer_refresh
       if (count:=selected.Count()) {
          Gui exp: Default 
          Gui exp: -AlwaysOnTop
@@ -2093,7 +2297,6 @@ file_manager(from:="/sdcard") {
             } else {
                Run, "%to%"
             }
-            selected:={}
          }
       }
    return
@@ -2122,7 +2325,7 @@ file_manager(from:="/sdcard") {
    explorer_load:
       GuiControl, exp:, current_path, % from
       ToolTip, % "Loading " . from . " contents..."
-      tree:=[], dir:=SubStr(from,0)="/" ? from : from . "/", selected:={}
+      tree:=[], dir:=SubStr(from,0)="/" ? from : from . "/"
       Loop, parse, % adb_shell("ls -lb """ . dir . """ 2>dev/null"), `n,`r 
       {
          if (chr:=SubStr(A_LoopField,1,1)) {
@@ -2175,20 +2378,6 @@ file_manager(from:="/sdcard") {
          }
       } else if (A_GuiEvent = "RightClick") {
          Menu, MenuExp, Show
-      } else if (A_GuiEvent = "I") {
-         StringCaseSense, On
-         Loop, Parse, on_action
-         {
-            ;Case "F":;Focused Case "f":;Defocused Case "C":;Checked" Case "c":;Unchecked
-            switch (A_LoopField)
-            {
-               case "S": ;Selected
-                  selected[A_EventInfo]:=true
-               Case "s": ;Deselected
-                  (selected[A_EventInfo]) ? selected.RemoveAt(A_EventInfo)
-            }
-         }
-         StringCaseSense, Off
       }
       GuiControl, exp:+gexplorer_list, explorer_list
    return
@@ -2199,7 +2388,7 @@ file_manager(from:="/sdcard") {
       Sleep 250
       GuiControl, exp: -g, to_find_exp
       Gui exp: Submit, NoHide
-      at_pos:=0, selected:={}
+      at_pos:=0
       for key, file in tree
       {
          if (!skip)&&(InStr(file.name, to_find_exp)) {
@@ -4642,15 +4831,18 @@ Gui, Add, GroupBox, XS Y+10 h%boxH% w%boxW% c254EC5, Extra Actions
 Gui, Font, s10, %style%
 Gui, Add, Text, XP+10 YP+30 Section, Remove bloatware:
 Gui, Add, Text, XP Y+30, Extract-send files: 
+Gui, Add, Text, XP Y+30, Download modules: 
 Gui, Add, Text, XP Y+30, Open the console: 
 Gui, Font, s10, Arial Black
 Gui, Add, Text, XS+130 YS c254EC5, -►
-Gui, Add, Text, XP Y+30 c254EC5, -►
-Gui, Add, Text, XP Y+30 c254EC5, -►
+Gui, Add, Text, XP Y+27 c254EC5, -►
+Gui, Add, Text, XP Y+27 c254EC5, -►
+Gui, Add, Text, XP Y+27 c254EC5, -►
 Gui, Font, s10, %style%
 Gui, Add, Button, center X+5 YS-10 h40 w100 gapp_manager, App Manager
-Gui, Add, Button, center XP Y+10 h40 w100 gfile_manager, File Manager
-Gui, Add, Button, center XP Y+10 h40 w100 guser_console, Console
+Gui, Add, Button, center XP Y+7 h40 w100 gfile_manager, File Manager
+Gui, Add, Button, center XP Y+7 h40 w100 gmodules, Modules
+Gui, Add, Button, center XP Y+7 h40 w100 guser_console, Console
 Gui, Tab, 3
 Gui, Font, s10, Arial Black
 Gui, Add, GroupBox, x%mx% Y+5 h%boxH% w%boxW% c254EC5 Section, General Configs

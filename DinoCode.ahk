@@ -91,7 +91,7 @@ config_rc() {
    GLOBAL.false:=0, GLOBAL.true:=1, GLOBAL.verdadero:=1, GLOBAL.falso:=0
    ; Extra
    CONFIG ? HERE:=dirname(CONFIG) : HERE:=A_ScriptDir, TOOL:=A_ScriptDir, secure_user_info:=true
-   wipe_env()
+   wipe_env(true)
 }
 
 ; Event control
@@ -113,7 +113,7 @@ __DinoGui__(Hwnd,GuiEvent,EventInfo,ErrLevel:="")
 update_key(key,state:="") {
    GuiControl, 1:Choose, % key, % state
    if ErrorLevel {
-      GuiControl,1:, % key, % state
+      GuiControl,1:Text, % key, % state
 	  return ErrorLevel
    }
    return 1
